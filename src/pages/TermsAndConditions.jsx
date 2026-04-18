@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext"
 import { acceptTermsForEmail, hasAcceptedTerms } from "../lib/termsAcceptance"
 
 export default function TermsAndConditions() {
-  const { user } = useAuth()
+  const { user, updateProfile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [agreed, setAgreed] = useState(false)
@@ -13,9 +13,9 @@ export default function TermsAndConditions() {
   const setup = query.get("setup") === "1"
   const confirmed = query.get("confirmed") === "1"
   const returnTo = query.get("returnTo") || "/profile?setup=1&confirmed=1"
-  const alreadyAccepted = hasAcceptedTerms(user?.email)
+  const alreadyAccepted = Boolean(user?.termsAcceptedAt) || hasAcceptedTerms(user?.email)
 
-  const handleAgree = () => {
+  const handleAgree = async () => {
     if (!user?.email) {
       navigate("/login")
       return
@@ -24,6 +24,10 @@ export default function TermsAndConditions() {
     if (!agreed && !alreadyAccepted) return
 
     acceptTermsForEmail(user.email)
+    await Promise.resolve(updateProfile({
+      termsAcceptedAt: new Date().toISOString(),
+      termsVersion: 1
+    }))
     navigate(returnTo)
   }
 

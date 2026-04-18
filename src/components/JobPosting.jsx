@@ -130,7 +130,7 @@ export default function JobPosting() {
     setLoading(true)
 
     try {
-      createJob({
+      await createJob({
         ...formData,
         budget: budgetMax,
         budgetMin,
@@ -139,6 +139,7 @@ export default function JobPosting() {
       navigate("/dashboard")
     } catch (error) {
       console.error("Error creating job:", error)
+      alert(error.message || "Failed to create job")
     } finally {
       setLoading(false)
     }

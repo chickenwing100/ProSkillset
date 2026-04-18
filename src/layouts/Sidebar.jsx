@@ -41,7 +41,6 @@ export default function Sidebar({ mobile = false, onNavigate }) {
     { name: 'Messages', href: '/messages', icon: '💬' },
     { name: 'Contractors', href: '/contractors', icon: '👷' },
     { name: 'Profile', href: '/profile', icon: '👤' },
-    { name: 'Account Settings', href: '/account-settings', icon: '⚙️' },
   ]
 
   const navigation = user?.role === 'admin'

@@ -6,6 +6,22 @@ import { queueAutomatedWelcomeMessages } from '../lib/automatedMessages'
 import { getTermsRedirectPath } from '../lib/termsAcceptance'
 import { TRADE_CATEGORY_GROUPS, normalizeTradeCategories } from '../lib/trades'
 
+const CONTRACTOR_SIGNUP_DRAFTS_KEY = 'pendingContractorSignupDraftsV1'
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
+
+const readPendingContractorSignupDrafts = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CONTRACTOR_SIGNUP_DRAFTS_KEY) || '{}')
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const writePendingContractorSignupDrafts = (drafts) => {
+  localStorage.setItem(CONTRACTOR_SIGNUP_DRAFTS_KEY, JSON.stringify(drafts))
+}
+
 export default function ContractorSignup() {
   const [formData, setFormData] = useState({
     email: '',
@@ -21,6 +37,7 @@ export default function ContractorSignup() {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
   const navigate = useNavigate()
   const contractorAgreementReturnTo = '/contractor-agreement?setup=1&confirmed=1'
 
@@ -48,6 +65,7 @@ export default function ContractorSignup() {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setInfo('')
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
@@ -68,16 +86,26 @@ export default function ContractorSignup() {
     }
 
     const selectedTrades = normalizeTradeCategories(formData.tradeCategories)
+    const normalizedEmail = normalizeEmail(formData.email)
     const additionalSkills = String(formData.skills || '')
       .split(',')
       .map((skill) => skill.trim())
       .filter(Boolean)
     const combinedSkills = Array.from(new Set([...selectedTrades, ...additionalSkills]))
+    const draftProfile = {
+      name: formData.fullName,
+      contractorName: formData.fullName,
+      bio: formData.bio,
+      skills: combinedSkills,
+      tradeCategories: selectedTrades,
+      experience: formData.experience,
+      hourlyRate: parseFloat(formData.hourlyRate) || '',
+      location: formData.location
+    }
 
     try {
-      // Sign up the user
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
+        email: normalizedEmail,
         password: formData.password,
         options: {
           emailRedirectTo: `${window.location.origin}${getTermsRedirectPath({ returnTo: contractorAgreementReturnTo })}`,
@@ -91,29 +119,21 @@ export default function ContractorSignup() {
       if (authError) throw authError
 
       if (authData.user) {
-        // Create the profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: authData.user.id,
-            email: formData.email,
-            full_name: formData.fullName,
-            role: 'contractor',
-            bio: formData.bio,
-            skills: combinedSkills,
-            experience: formData.experience,
-            hourly_rate: parseFloat(formData.hourlyRate) || null,
-            location: formData.location
-          })
+        const pendingDrafts = readPendingContractorSignupDrafts()
+        pendingDrafts[normalizedEmail] = draftProfile
+        writePendingContractorSignupDrafts(pendingDrafts)
 
-        if (profileError) throw profileError
-
-        queueAutomatedWelcomeMessages({
-          email: formData.email,
+        void queueAutomatedWelcomeMessages({
+          email: normalizedEmail,
           role: 'contractor'
         })
 
-        navigate('/dashboard')
+        if (!authData.session) {
+          setInfo('Account created. Please confirm your email to continue your setup flow.')
+          return
+        }
+
+        navigate('/profile?setup=1&confirmed=1')
       }
     } catch (error) {
       console.error('Error signing up:', error)
@@ -141,6 +161,11 @@ export default function ContractorSignup() {
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+            {info && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-md">
+                {info}
+              </div>
+            )}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
                 {error}

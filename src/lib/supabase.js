@@ -33,6 +33,7 @@ if (!hasValidCredentials) {
     functions: {
       invoke: () => Promise.resolve({ data: null, error: new Error("Supabase Edge Functions are not configured") })
     },
+    rpc: () => Promise.resolve({ data: null, error: null }),
     from: () => ({
       select: () => Promise.resolve({ data: [], error: null }),
       insert: () => Promise.resolve({ data: null, error: null }),

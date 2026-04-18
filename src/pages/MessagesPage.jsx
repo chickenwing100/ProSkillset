@@ -40,7 +40,7 @@ export default function MessagesPage() {
     }
 
     const jobsById = new Map(
-      jobs.map((job) => [Number(job.id), job])
+      jobs.map((job) => [String(job.id).trim(), job])
     )
 
     const resolveNameByEmail = (email, fallbackName = "") => {
@@ -116,7 +116,7 @@ export default function MessagesPage() {
       if (!otherEmail || myEmails.includes(otherEmail)) return
 
       const guessedName = myEmails.includes(message.from) ? message.toName : message.fromName
-      const linkedJob = jobsById.get(Number(message.jobId))
+      const linkedJob = jobsById.get(String(message.jobId).trim())
       const reference = formatProjectReference(
         message.poNumber || linkedJob?.poNumber,
         message.jobTitle || linkedJob?.title
@@ -156,10 +156,14 @@ export default function MessagesPage() {
         button: "bg-blue-600 hover:bg-blue-700"
       }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!selectedEmail || !draft.trim()) return
-    sendMessage({ to: selectedEmail, text: draft })
-    setDraft("")
+    try {
+      await sendMessage({ to: selectedEmail, text: draft })
+      setDraft("")
+    } catch (error) {
+      alert(error.message || "Unable to send message")
+    }
   }
 
   const formatProjectReference = (poNumber, jobTitle) => {
@@ -217,7 +221,7 @@ export default function MessagesPage() {
                   ) : (
                     conversation.map((message) => {
                       const mine = message.from === user.email || (user?.role === "admin" && message.from === SYSTEM_EMAIL)
-                      const linkedJob = jobs.find((job) => Number(job.id) === Number(message.jobId))
+                      const linkedJob = jobs.find((job) => String(job.id).trim() === String(message.jobId).trim())
                       const messageReference = formatProjectReference(
                         message.poNumber || linkedJob?.poNumber,
                         message.jobTitle || linkedJob?.title

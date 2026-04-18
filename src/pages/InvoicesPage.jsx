@@ -8,6 +8,8 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase"
 import { formatDateTime } from "../lib/dateTime"
 import { createInvoicePaymentCheckout } from "../services/stripeBillingService"
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
+
 function statusClasses(status) {
   if (status === "paid") return "bg-emerald-100 text-emerald-700"
   if (status === "sent") return "bg-blue-100 text-blue-700"
@@ -79,7 +81,7 @@ export default function InvoicesPage() {
 
     const map = new Map()
     jobs
-      .filter((job) => job.selectedContractor === user.email || job.status === "completed")
+      .filter((job) => normalizeEmail(job.selectedContractor) === normalizeEmail(user.email) || job.status === "completed")
       .forEach((job) => {
         if (!job.postedBy) return
         map.set(job.postedBy, {
@@ -94,7 +96,7 @@ export default function InvoicesPage() {
   const contractorProjects = useMemo(() => {
     if (user?.role !== "contractor") return []
     return jobs
-      .filter((job) => job.selectedContractor === user.email || job.status === "completed")
+        .filter((job) => normalizeEmail(job.selectedContractor) === normalizeEmail(user.email) || job.status === "completed")
       .sort((a, b) => new Date(b.postedDate || 0) - new Date(a.postedDate || 0))
   }, [jobs, user])
 

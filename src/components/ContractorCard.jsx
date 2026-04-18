@@ -6,7 +6,7 @@ export default function ContractorCard({ contractor }) {
 
   // Fallback values are only used when profile data is missing.
   const defaultContractor = {
-    id: contractor?.id || 1,
+    id: contractor?.id || contractor?.email || "",
     name: contractor?.name || 'Sarah Johnson',
     trade: contractor?.trade || 'Plumbing',
     rating: Number(contractor?.rating || 5),

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate, Link, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { isSupabaseConfigured, supabase } from "../lib/supabase"
@@ -12,10 +12,17 @@ export default function Login() {
   const [info, setInfo] = useState("")
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
-  const { login } = useAuth()
+  const { user, loading: authLoading, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const isConfirmed = new URLSearchParams(location.search).get("confirmed") === "1"
+
+  useEffect(() => {
+    if (authLoading) return
+    if (user) {
+      navigate("/dashboard", { replace: true })
+    }
+  }, [authLoading, navigate, user])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -23,13 +30,18 @@ export default function Login() {
     setError("")
     setInfo("")
 
-    const result = await login(email, password)
-    setLoading(false)
+    try {
+      const result = await login(email, password)
 
-    if (result.success) {
-      navigate("/dashboard")
-    } else {
-      setError(result.error)
+      if (result.success) {
+        navigate("/dashboard")
+      } else {
+        setError(result.error || "Unable to sign in")
+      }
+    } catch (err) {
+      setError(err?.message || "Unable to sign in")
+    } finally {
+      setLoading(false)
     }
   }
 

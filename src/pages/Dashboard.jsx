@@ -12,6 +12,8 @@ import SavedContractors from "../components/dashboard/SavedContractors"
 import ClientProjectsProgress from "../components/dashboard/ClientProjectsProgress"
 import UnreadMessagesNotice from "../components/dashboard/UnreadMessagesNotice"
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
+
 export default function Dashboard() {
   const { user } = useAuth()
   const { buttonStyles, accentStyles } = useTheme()
@@ -48,7 +50,7 @@ export default function Dashboard() {
       if ((job.applications || []).length >= 5) return false
 
       if (user.role === "contractor") {
-        return job.postedBy !== user.email
+        return normalizeEmail(job.postedBy) !== normalizeEmail(user.email)
       }
 
       return true

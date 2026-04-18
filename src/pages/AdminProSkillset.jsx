@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext"
 import { useJobs } from "../context/JobsContext"
 import { useMessages } from "../context/MessagesContext"
 import { useToast } from "../context/ToastContext"
-import { queueAutomatedWelcomeMessages } from "../lib/automatedMessages"
+import { WELCOME_MESSAGE_TEMPLATES } from "../lib/automatedMessages"
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
 
@@ -76,7 +76,7 @@ export default function AdminProSkillset() {
     )
   }
 
-  const handleSendDirectMessage = () => {
+  const handleSendDirectMessage = async () => {
     if (!selectedRecipient) {
       showToast("Select a recipient first.", "error")
       return
@@ -87,7 +87,7 @@ export default function AdminProSkillset() {
       return
     }
 
-    const result = sendBulkMessages({
+    const result = await sendBulkMessages({
       recipients: [selectedRecipient],
       text: directMessage
     })
@@ -101,7 +101,7 @@ export default function AdminProSkillset() {
     showToast("Message sent.", "success")
   }
 
-  const handleSendBroadcast = () => {
+  const handleSendBroadcast = async () => {
     if (!broadcastMessage.trim()) {
       showToast("Enter a broadcast message first.", "error")
       return
@@ -116,7 +116,7 @@ export default function AdminProSkillset() {
       .map((profile) => normalizeEmail(profile.email))
       .filter((email) => email && email !== normalizeEmail(user?.email))
 
-    const result = sendBulkMessages({
+    const result = await sendBulkMessages({
       recipients,
       text: broadcastMessage
     })
@@ -130,16 +130,34 @@ export default function AdminProSkillset() {
     showToast(`Broadcast sent to ${result.sentCount} users.`, "success")
   }
 
-  const handleSendWelcomeToUser = (profile) => {
-    const result = queueAutomatedWelcomeMessages({
-      email: profile.email,
-      role: profile.role,
-      force: true
-    })
-    if (!result.sentCount) {
+  const handleSendWelcomeToUser = async (profile) => {
+    const normalizedRole = normalizeEmail(profile.role)
+    const templates = WELCOME_MESSAGE_TEMPLATES[normalizedRole]
+
+    if (!Array.isArray(templates) || templates.length === 0) {
       showToast(`No welcome messages configured for role: ${profile.role}.`, "error")
       return
     }
+
+    const recipient = normalizeEmail(profile.email)
+    let sentCount = 0
+
+    for (const templateText of templates) {
+      const text = String(templateText || "").trim()
+      if (!text) continue
+
+      const result = await sendBulkMessages({
+        recipients: [recipient],
+        text
+      })
+      sentCount += Number(result?.sentCount || 0)
+    }
+
+    if (!sentCount) {
+      showToast(`No welcome messages were sent to ${profile.email}.`, "error")
+      return
+    }
+
     showToast(`Welcome messages sent to ${profile.name || profile.email}.`, "success")
   }
 

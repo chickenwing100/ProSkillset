@@ -8,6 +8,7 @@ import { formatDateTime } from "../lib/dateTime"
 
 const MAX_PROGRESS_PHOTOS = 8
 const MAX_PROGRESS_PHOTO_SIZE = 8 * 1024 * 1024
+const sameJobId = (left, right) => String(left || "").trim() === String(right || "").trim()
 
 function toBase64(file) {
   return new Promise((resolve, reject) => {
@@ -111,7 +112,7 @@ export default function ProjectDetails() {
   const projectThreadMessages = useMemo(
     () => messages
       .filter((message) =>
-        Number(message.jobId) === Number(job?.id) &&
+        sameJobId(message.jobId, job?.id) &&
         projectParticipants.includes(message.from) &&
         projectParticipants.includes(message.to)
       )
@@ -143,7 +144,8 @@ export default function ProjectDetails() {
 
   const isClientOwner = user?.email === job.postedBy
   const isAcceptedContractor = user?.email === job.selectedContractor
-  const canApply = user?.role === "contractor" && !isClientOwner && !job.selectedContractor
+  const claimLimitReached = (job.applications || []).length >= 5
+  const canApply = user?.role === "contractor" && !isClientOwner && !job.selectedContractor && !claimLimitReached
 
   const formatMoney = (value) => Number(value || 0).toFixed(2)
 
@@ -215,7 +217,7 @@ export default function ProjectDetails() {
     }
 
     try {
-      applyToJob(job.id, {
+      await applyToJob(job.id, {
         message: applicationMessage,
         applicantName: user.name,
         bidAmount: maxBid,
@@ -241,7 +243,7 @@ export default function ProjectDetails() {
 
   const handleProgressUpdate = async () => {
     try {
-      addProgressUpdate(job.id, {
+      await addProgressUpdate(job.id, {
         progress: progressValue === "" ? job.progress : Number(progressValue),
         note: progressNote,
         photos: progressPhotos
@@ -256,7 +258,7 @@ export default function ProjectDetails() {
     }
   }
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!messageText.trim()) return
 
     const recipient = isClientOwner ? job.selectedContractor : job.postedBy
@@ -265,23 +267,27 @@ export default function ProjectDetails() {
       return
     }
 
-    sendMessage({
-      to: recipient,
-      text: messageText,
-      jobId: job.id,
-      jobTitle: job.title,
-      poNumber: job.poNumber
-    })
-    setMessageText("")
+    try {
+      await sendMessage({
+        to: recipient,
+        text: messageText,
+        jobId: job.id,
+        jobTitle: job.title,
+        poNumber: job.poNumber
+      })
+      setMessageText("")
+    } catch (error) {
+      alert(error.message || "Unable to send message")
+    }
   }
 
-  const handleSubmitReview = () => {
+  const handleSubmitReview = async () => {
     if (!isClientOwner || job.status !== "completed" || !job.selectedContractor) {
       return
     }
 
     try {
-      submitReview({
+      await submitReview({
         jobId: job.id,
         contractorEmail: job.selectedContractor,
         clientEmail: user.email,
@@ -631,7 +637,13 @@ export default function ProjectDetails() {
                     <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">{application.status || "pending"}</span>
                     {!job.selectedContractor && (
                       <button
-                        onClick={() => acceptApplication(job.id, application.id)}
+                        onClick={async () => {
+                          try {
+                            await acceptApplication(job.id, application.id)
+                          } catch (error) {
+                            alert(error.message || "Unable to accept bid")
+                          }
+                        }}
                         className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors"
                       >
                         Accept Bid
@@ -712,7 +724,13 @@ export default function ProjectDetails() {
                 </button>
                 {job.status !== "completed" && (
                   <button
-                    onClick={() => markJobComplete(job.id)}
+                    onClick={async () => {
+                      try {
+                        await markJobComplete(job.id)
+                      } catch (error) {
+                        alert(error.message || "Unable to mark job complete")
+                      }
+                    }}
                     className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
                   >
                     Mark Job Complete
@@ -725,7 +743,13 @@ export default function ProjectDetails() {
           {isClientOwner && job.completionRequested && !job.completionConfirmed && (
             <div className="mb-4">
               <button
-                onClick={() => confirmJobCompletion(job.id)}
+                onClick={async () => {
+                  try {
+                    await confirmJobCompletion(job.id)
+                  } catch (error) {
+                    alert(error.message || "Unable to confirm job completion")
+                  }
+                }}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Confirm Job Completion

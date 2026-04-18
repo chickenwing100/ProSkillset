@@ -7,6 +7,11 @@ const InvoicesContext = createContext()
 const STORAGE_KEY = "invoices_v1"
 
 const normalizeEmail = (value) => (value || "").trim().toLowerCase()
+const normalizeRelatedJobId = (value) => {
+  if (value == null) return null
+  const normalized = String(value).trim()
+  return normalized || null
+}
 
 const normalizeInvoice = (invoice) => ({
   id: invoice.id,
@@ -17,7 +22,7 @@ const normalizeInvoice = (invoice) => ({
   description: invoice.description || "",
   amount: Number(invoice.amount || 0),
   dueDate: invoice.dueDate || invoice.due_date || "",
-  relatedJobId: invoice.relatedJobId || invoice.related_job_id || null,
+  relatedJobId: normalizeRelatedJobId(invoice.relatedJobId ?? invoice.related_job_id),
   relatedJobTitle: invoice.relatedJobTitle || invoice.related_job_title || "",
   relatedJobPoNumber: invoice.relatedJobPoNumber || invoice.related_job_po_number || "",
   paymentStage: String(invoice.paymentStage || invoice.payment_stage || "full").toLowerCase(),
@@ -44,7 +49,7 @@ const toSupabaseInvoice = (invoice, includeOptional = true) => ({
   due_date: invoice.dueDate || null,
   ...(includeOptional
     ? {
-        related_job_id: invoice.relatedJobId ? Number(invoice.relatedJobId) : null,
+        related_job_id: normalizeRelatedJobId(invoice.relatedJobId),
         related_job_title: invoice.relatedJobTitle || null,
         related_job_po_number: invoice.relatedJobPoNumber || null,
         payment_stage: invoice.paymentStage || "full"

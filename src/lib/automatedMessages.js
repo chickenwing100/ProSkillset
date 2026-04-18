@@ -1,3 +1,6 @@
+import { isSupabaseConfigured, supabase } from "./supabase"
+import { createUuid } from "./uuid"
+
 const SYSTEM_SENDER = {
   email: "welcome@proskillset.app",
   name: "ProSkillset Team"
@@ -68,7 +71,40 @@ const setSentRegistry = (registry) => {
   localStorage.setItem("automatedWelcomeSentV1", JSON.stringify(registry))
 }
 
-export const queueAutomatedWelcomeMessages = ({ email, role, force = false }) => {
+const serializeForDatabase = (message) => ({
+  id: message.id,
+  from_email: message.from,
+  from_name: message.fromName,
+  to_email: message.to,
+  text: message.text,
+  job_id: null,
+  job_title: "",
+  po_number: "",
+  created_at: message.createdAt,
+  read_by: Array.isArray(message.readBy) ? message.readBy : [SYSTEM_SENDER.email]
+})
+
+const persistWelcomeMessagesToSupabase = async (messages) => {
+  if (!isSupabaseConfigured || !Array.isArray(messages) || messages.length === 0) {
+    return { persisted: false, error: null }
+  }
+
+  try {
+    const { error } = await supabase
+      .from("messages")
+      .upsert(messages.map(serializeForDatabase), { onConflict: "id" })
+
+    if (error) {
+      return { persisted: false, error }
+    }
+
+    return { persisted: true, error: null }
+  } catch (error) {
+    return { persisted: false, error }
+  }
+}
+
+export const queueAutomatedWelcomeMessages = async ({ email, role, force = false }) => {
   const normalizedEmail = normalizeEmail(email)
   const normalizedRole = normalizeRole(role)
 
@@ -86,7 +122,7 @@ export const queueAutomatedWelcomeMessages = ({ email, role, force = false }) =>
     .map((text, index) => String(text || "").trim())
     .filter(Boolean)
     .map((text, index) => ({
-      id: now + index,
+      id: createUuid(),
       from: SYSTEM_SENDER.email,
       fromName: SYSTEM_SENDER.name,
       to: normalizedEmail,
@@ -100,11 +136,29 @@ export const queueAutomatedWelcomeMessages = ({ email, role, force = false }) =>
 
   if (!outbound.length) return { sentCount: 0 }
 
-  const existingMessages = getStorageMessages()
-  setStorageMessages([...existingMessages, ...outbound])
+  if (!isSupabaseConfigured) {
+    const existingMessages = getStorageMessages()
+    setStorageMessages([...existingMessages, ...outbound])
+    sentRegistry[registryKey] = true
+    setSentRegistry(sentRegistry)
+    return { sentCount: outbound.length, persisted: false, deferred: false }
+  }
 
-  sentRegistry[registryKey] = true
-  setSentRegistry(sentRegistry)
+  const persistResult = await persistWelcomeMessagesToSupabase(outbound)
+  if (persistResult.persisted) {
+    const existingMessages = getStorageMessages()
+    setStorageMessages([...existingMessages, ...outbound])
+    sentRegistry[registryKey] = true
+    setSentRegistry(sentRegistry)
+    return { sentCount: outbound.length, persisted: true, deferred: false }
+  }
 
-  return { sentCount: outbound.length }
+  // Supabase-backed mode with no current permission/session:
+  // do not mark as sent so login can retry and persist consistently.
+  return {
+    sentCount: 0,
+    persisted: false,
+    deferred: true,
+    error: persistResult.error?.message || null
+  }
 }

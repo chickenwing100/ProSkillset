@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import UserProfile from "../components/UserProfile"
 import ContractorProfilePage from "../components/ContractorProfilePage"
+import ClientPasswordPanel from "../components/ClientPasswordPanel"
 import { hasAcceptedTerms } from "../lib/termsAcceptance"
 import { hasAcceptedContractorAgreement } from "../lib/contractorAgreementAcceptance"
 
@@ -23,19 +24,21 @@ export default function Profile() {
   const query = new URLSearchParams(location.search)
   const isSetupFlow = query.get("setup") === "1"
   const isConfirmed = query.get("confirmed") === "1"
+  const termsAccepted = Boolean(profileUser?.termsAcceptedAt) || hasAcceptedTerms(currentUserEmail)
+  const contractorAgreementAccepted = Boolean(profileUser?.contractorAgreementAcceptedAt) || hasAcceptedContractorAgreement(currentUserEmail)
 
   useEffect(() => {
     if (!isOwnProfile || !isSetupFlow || !isConfirmed || !currentUserEmail) return
-    if (hasAcceptedTerms(currentUserEmail)) return
+    if (termsAccepted) return
 
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`)
     navigate(`/terms-and-conditions?setup=1&confirmed=1&returnTo=${returnTo}`, { replace: true })
-  }, [currentUserEmail, isConfirmed, isOwnProfile, isSetupFlow, location.pathname, location.search, navigate])
+  }, [currentUserEmail, isConfirmed, isOwnProfile, isSetupFlow, location.pathname, location.search, navigate, termsAccepted])
 
   useEffect(() => {
     if (!isOwnProfile || !isSetupFlow || !isConfirmed || !currentUserEmail) return
     if (profileUser?.role !== "contractor") return
-    if (hasAcceptedContractorAgreement(currentUserEmail)) return
+    if (contractorAgreementAccepted) return
 
     const returnTo = encodeURIComponent(`${location.pathname}${location.search}`)
     navigate(`/contractor-agreement?setup=1&confirmed=1&returnTo=${returnTo}`, { replace: true })
@@ -47,7 +50,8 @@ export default function Profile() {
     location.pathname,
     location.search,
     navigate,
-    profileUser?.role
+    profileUser?.role,
+    contractorAgreementAccepted
   ])
 
   if (!profileUser) {
@@ -88,7 +92,10 @@ export default function Profile() {
           <ContractorProfilePage user={profileUser} isOwnProfile={isOwnProfile} />
         )}
         {profileUser.role !== "contractor" && (
-          <UserProfile user={profileUser} isOwnProfile={isOwnProfile} />
+          <div className="space-y-6">
+            <UserProfile user={profileUser} isOwnProfile={isOwnProfile} />
+            {isOwnProfile && profileUser.role === "client" && <ClientPasswordPanel />}
+          </div>
         )}
       </div>
     </div>

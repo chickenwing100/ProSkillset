@@ -4,9 +4,15 @@ import { useSavedContractors } from '../context/SavedContractorsContext'
 import { useJobs } from '../context/JobsContext'
 import { useMessages } from '../context/MessagesContext'
 import { useReviews } from '../context/ReviewsContext'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { TRADE_CATEGORY_GROUPS, normalizeTradeCategories, getPrimaryTrade, tradeFilterOptions, toTradeValue } from '../lib/trades'
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
+const normalizeJobId = (value) => {
+  if (value == null) return null
+  const normalized = String(value).trim()
+  return normalized || null
+}
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const parseTimestamp = (value) => {
@@ -51,7 +57,7 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
   const relatedClientEmails = new Set()
 
   normalizedJobs.forEach((job) => {
-    const jobId = Number(job?.id)
+    const jobId = normalizeJobId(job?.id)
     const postedBy = normalizeEmail(job?.postedBy)
     const selectedContractor = normalizeEmail(job?.selectedContractor)
     const hasApplication = Array.isArray(job?.applications)
@@ -59,7 +65,7 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
       : false
 
     if (selectedContractor === normalizedContractorEmail || hasApplication) {
-      if (Number.isFinite(jobId)) {
+      if (jobId) {
         jobsById.set(jobId, job)
       }
       if (postedBy) {
@@ -74,13 +80,13 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
       from: normalizeEmail(message?.from),
       to: normalizeEmail(message?.to),
       timestamp: parseTimestamp(message?.createdAt),
-      numericJobId: Number(message?.jobId)
+      normalizedJobId: normalizeJobId(message?.jobId)
     }))
     .filter((message) => message.timestamp != null)
     .filter((message) => message.from === normalizedContractorEmail || message.to === normalizedContractorEmail)
     .filter((message) => {
       const otherParty = message.from === normalizedContractorEmail ? message.to : message.from
-      const linkedJob = jobsById.get(message.numericJobId)
+      const linkedJob = jobsById.get(message.normalizedJobId)
       if (linkedJob) {
         return normalizeEmail(linkedJob.postedBy) === otherParty
       }
@@ -93,13 +99,13 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
 
   relevantMessages.forEach((message) => {
     const otherParty = message.from === normalizedContractorEmail ? message.to : message.from
-    const threadKey = `${otherParty}:${Number.isFinite(message.numericJobId) ? message.numericJobId : 'direct'}`
+    const threadKey = `${otherParty}:${message.normalizedJobId || 'direct'}`
 
     if (message.to === normalizedContractorEmail && message.from !== normalizedContractorEmail) {
       if (!pendingRequestsByThread.has(threadKey)) {
         pendingRequestsByThread.set(threadKey, {
           requestedAt: message.timestamp,
-          jobId: Number.isFinite(message.numericJobId) ? message.numericJobId : null
+          jobId: message.normalizedJobId
         })
       }
       return
@@ -154,66 +160,97 @@ export default function ContractorsPage() {
     tradeFilterOptions.map((option) => [option.value, option.category || ''])
   ), [])
 
+  const mapProfilesToContractors = (profiles = []) => {
+    return profiles
+      .filter((profile) => profile && typeof profile === 'object')
+      .filter((profile) => normalizeEmail(profile.role) === 'contractor')
+      .filter((profile) => !normalizeEmail(profile.email).endsWith('@example.com'))
+      .map((profile) => {
+        const portfolioProfileData = profile?.portfolio?.profile_data && typeof profile.portfolio.profile_data === 'object'
+          ? profile.portfolio.profile_data
+          : {}
+        const email = normalizeEmail(profile.email)
+        const metric = computeResponseMetric({ contractorEmail: email, jobs, messages })
+        const contractorReviews = reviews.filter((review) => normalizeEmail(review?.contractorEmail) === email)
+        const totalRating = contractorReviews.reduce((sum, review) => sum + Number(review?.rating || 0), 0)
+        const reviewCount = contractorReviews.length
+        const rating = reviewCount > 0 ? Number((totalRating / reviewCount).toFixed(1)) : 5
+        const completedProjects = jobs.filter((job) =>
+          normalizeEmail(job?.selectedContractor) === email &&
+          (job?.status === 'completed' || job?.completionConfirmed)
+        ).length
+
+        const normalizedTradeCategories = normalizeTradeCategories(
+          profile.tradeCategories ||
+          portfolioProfileData.tradeCategories ||
+          profile.tradeCategory ||
+          profile.trade ||
+          profile.specialty ||
+          profile.skills ||
+          portfolioProfileData.skills ||
+          []
+        )
+
+        return {
+          id: email,
+          email,
+          name: profile.name || profile.full_name || email,
+          trade: getPrimaryTrade(normalizedTradeCategories),
+          tradeCategories: normalizedTradeCategories,
+          location: profile.location || profile.serviceArea || profile.service_area || 'Location not set',
+          description: profile.bio || profile.description || portfolioProfileData.bio || 'No profile description yet.',
+          photo: profile.profilePhoto || profile.profilePhotoUrl || profile.profile_photo_url || profile.avatar_url || '/api/placeholder/150/150',
+          verified: Boolean(profile.insuranceVerified || portfolioProfileData.insuranceVerified || portfolioProfileData.insuranceVerifiedByAdmin),
+          responseTime: metric.responseTime,
+          responseHoursBucket: metric.responseHoursBucket,
+          responseSamples: metric.responseSamples,
+          completedProjects,
+          rating,
+          reviewCount,
+          saved: isContractorSaved(email)
+        }
+      })
+  }
+
   const readContractorsFromStorage = () => {
     try {
       const usersMap = JSON.parse(localStorage.getItem('users') || '{}')
       if (!usersMap || typeof usersMap !== 'object') return []
 
-      return Object.values(usersMap)
-        .filter((profile) => profile && typeof profile === 'object')
-        .filter((profile) => normalizeEmail(profile.role) === 'contractor')
-        .filter((profile) => !normalizeEmail(profile.email).endsWith('@example.com'))
-        .map((profile) => {
-          const email = normalizeEmail(profile.email)
-          const metric = computeResponseMetric({ contractorEmail: email, jobs, messages })
-          const contractorReviews = reviews.filter((review) => normalizeEmail(review?.contractorEmail) === email)
-          const totalRating = contractorReviews.reduce((sum, review) => sum + Number(review?.rating || 0), 0)
-          const reviewCount = contractorReviews.length
-          const rating = reviewCount > 0 ? Number((totalRating / reviewCount).toFixed(1)) : 5
-          const completedProjects = jobs.filter((job) =>
-            normalizeEmail(job?.selectedContractor) === email &&
-            (job?.status === 'completed' || job?.completionConfirmed)
-          ).length
-
-          const normalizedTradeCategories = normalizeTradeCategories(
-            profile.tradeCategories ||
-            profile.tradeCategory ||
-            profile.trade ||
-            profile.specialty ||
-            profile.skills ||
-            []
-          )
-
-          return {
-            id: email,
-            email,
-            name: profile.name || profile.full_name || email,
-            trade: getPrimaryTrade(normalizedTradeCategories),
-            tradeCategories: normalizedTradeCategories,
-            location: profile.location || profile.serviceArea || 'Location not set',
-            description: profile.bio || profile.description || 'No profile description yet.',
-            photo: profile.profilePhoto || profile.profilePhotoUrl || profile.avatar_url || '/api/placeholder/150/150',
-            verified: Boolean(profile.insuranceVerified),
-            responseTime: metric.responseTime,
-            responseHoursBucket: metric.responseHoursBucket,
-            responseSamples: metric.responseSamples,
-            completedProjects,
-            rating,
-            reviewCount,
-            saved: isContractorSaved(email)
-          }
-        })
+      return mapProfilesToContractors(Object.values(usersMap))
     } catch {
       return []
     }
   }
 
-  useEffect(() => {
-    const hydrate = () => {
-      setContractors(readContractorsFromStorage())
+  const readContractorsFromSupabase = async () => {
+    if (!isSupabaseConfigured) {
+      return readContractorsFromStorage()
     }
 
-    hydrate()
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'contractor')
+
+      if (error) {
+        return readContractorsFromStorage()
+      }
+
+      return mapProfilesToContractors(Array.isArray(data) ? data : [])
+    } catch {
+      return readContractorsFromStorage()
+    }
+  }
+
+  useEffect(() => {
+    const hydrate = async () => {
+      const nextContractors = await readContractorsFromSupabase()
+      setContractors(nextContractors)
+    }
+
+    void hydrate()
     window.addEventListener('storage', hydrate)
     return () => window.removeEventListener('storage', hydrate)
   }, [isContractorSaved, jobs, messages, reviews, savedContractors])
@@ -336,7 +373,7 @@ export default function ContractorsPage() {
             />
 
             <button
-              onClick={() => setContractors(readContractorsFromStorage())}
+              onClick={async () => setContractors(await readContractorsFromSupabase())}
               className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
               Refresh
@@ -378,7 +415,7 @@ export default function ContractorsPage() {
         {!showSaved && contractorsToShow.length > 0 && (
           <div className="text-center mt-12">
             <button
-              onClick={() => setContractors(readContractorsFromStorage())}
+              onClick={async () => setContractors(await readContractorsFromSupabase())}
               className="bg-blue-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
               Refresh Contractor List

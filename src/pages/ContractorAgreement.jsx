@@ -7,7 +7,7 @@ import {
 } from "../lib/contractorAgreementAcceptance"
 
 export default function ContractorAgreement() {
-  const { user } = useAuth()
+  const { user, updateProfile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [agreed, setAgreed] = useState(false)
@@ -16,9 +16,9 @@ export default function ContractorAgreement() {
   const setup = query.get("setup") === "1"
   const confirmed = query.get("confirmed") === "1"
   const returnTo = query.get("returnTo") || "/profile?setup=1&confirmed=1"
-  const alreadyAccepted = hasAcceptedContractorAgreement(user?.email)
+  const alreadyAccepted = Boolean(user?.contractorAgreementAcceptedAt) || hasAcceptedContractorAgreement(user?.email)
 
-  const handleAgree = () => {
+  const handleAgree = async () => {
     if (!user?.email) {
       navigate("/login")
       return
@@ -27,6 +27,10 @@ export default function ContractorAgreement() {
     if (!agreed && !alreadyAccepted) return
 
     acceptContractorAgreementForEmail(user.email)
+    await Promise.resolve(updateProfile({
+      contractorAgreementAcceptedAt: new Date().toISOString(),
+      contractorAgreementVersion: 1
+    }))
     navigate(returnTo)
   }
 

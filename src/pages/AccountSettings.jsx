@@ -10,6 +10,7 @@ import {
 } from "../services/accountSettingsService"
 
 const toTeamMembersText = (members) => (Array.isArray(members) ? members.join("\n") : "")
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -44,6 +45,11 @@ export default function AccountSettings() {
     currentPassword: "",
     newPassword: "",
     confirmPassword: ""
+  })
+  const [showPasswords, setShowPasswords] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false
   })
 
   useEffect(() => {
@@ -117,7 +123,7 @@ export default function AccountSettings() {
     const nextProfile = {
       businessName: nextSettings.businessName,
       company: nextSettings.businessName,
-      contactEmail: nextSettings.contactEmail,
+      contactEmail: normalizeEmail(nextSettings.contactEmail || user?.email),
       phoneNumber: nextSettings.phoneNumber,
       serviceArea: nextSettings.serviceArea,
       location: nextSettings.serviceArea,
@@ -167,6 +173,16 @@ export default function AccountSettings() {
       setProfileRow(data.profileRow)
     }
 
+    setSettings((prev) => ({
+      ...prev,
+      businessName: syncedSettings.businessName,
+      contactEmail: normalizeEmail(syncedSettings.contactEmail || user.email),
+      phoneNumber: syncedSettings.phoneNumber,
+      serviceArea: syncedSettings.serviceArea,
+      teamMembersText: toTeamMembersText(syncedSettings.teamMembers),
+      profilePhotoUrl: syncedSettings.profilePhotoUrl || prev.profilePhotoUrl
+    }))
+
     const successMessage = data?.localOnly
       ? "Saved locally. Add Supabase keys to sync to database."
       : "Saved to Supabase"
@@ -185,6 +201,13 @@ export default function AccountSettings() {
     setPhotoPreviewUrl(URL.createObjectURL(file))
   }
 
+  const togglePasswordVisibility = (field) => {
+    setShowPasswords((prev) => ({
+      ...prev,
+      [field]: !prev[field]
+    }))
+  }
+
   const handlePhotoSave = async () => {
     if (!selectedPhotoFile || !user?.email) {
       updateSectionStatus("photo", "error", "Choose a photo before saving")
@@ -196,18 +219,23 @@ export default function AccountSettings() {
     updateSectionStatus("photo", "info", "Uploading...")
 
     let photoUrl = settings.profilePhotoUrl
-    const filePath = `${user.email}/profile-${Date.now()}-${selectedPhotoFile.name}`
+    const filePath = `${normalizeEmail(user.email)}/profile-${Date.now()}-${selectedPhotoFile.name}`
 
-    const { error: uploadError } = await supabase.storage
-      .from("profile-photos")
-      .upload(filePath, selectedPhotoFile, { upsert: true })
-
-    if (uploadError) {
+    if (!isSupabaseConfigured) {
       const inlineDataUrl = await fileToDataUrl(selectedPhotoFile)
       photoUrl = inlineDataUrl
     } else {
-      const { data: publicData } = supabase.storage.from("profile-photos").getPublicUrl(filePath)
-      photoUrl = publicData?.publicUrl || (await fileToDataUrl(selectedPhotoFile))
+      const { error: uploadError } = await supabase.storage
+        .from("profile-photos")
+        .upload(filePath, selectedPhotoFile, { upsert: true })
+
+      if (uploadError) {
+        const inlineDataUrl = await fileToDataUrl(selectedPhotoFile)
+        photoUrl = inlineDataUrl
+      } else {
+        const { data: publicData } = supabase.storage.from("profile-photos").getPublicUrl(filePath)
+        photoUrl = publicData?.publicUrl || (await fileToDataUrl(selectedPhotoFile))
+      }
     }
 
     setSettings((prev) => ({
@@ -239,6 +267,12 @@ export default function AccountSettings() {
     if (data?.profileRow) {
       setProfileRow(data.profileRow)
     }
+
+    setSettings((prev) => ({
+      ...prev,
+      profilePhotoUrl: photoUrl,
+      contactEmail: normalizeEmail(prev.contactEmail || user.email)
+    }))
 
     syncLocalProfile({
       businessName: settings.businessName,
@@ -467,33 +501,60 @@ export default function AccountSettings() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
-              <input
-                type="password"
-                value={passwordData.currentPassword}
-                onChange={(event) => setPasswordData((prev) => ({ ...prev, currentPassword: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                placeholder="Current password"
-              />
+              <div className="relative">
+                <input
+                  type={showPasswords.currentPassword ? "text" : "password"}
+                  value={passwordData.currentPassword}
+                  onChange={(event) => setPasswordData((prev) => ({ ...prev, currentPassword: event.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Current password"
+                />
+                <button
+                  type="button"
+                  onClick={() => togglePasswordVisibility("currentPassword")}
+                  className="absolute inset-y-0 right-0 px-3 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  {showPasswords.currentPassword ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-              <input
-                type="password"
-                value={passwordData.newPassword}
-                onChange={(event) => setPasswordData((prev) => ({ ...prev, newPassword: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                placeholder="At least 6 characters"
-              />
+              <div className="relative">
+                <input
+                  type={showPasswords.newPassword ? "text" : "password"}
+                  value={passwordData.newPassword}
+                  onChange={(event) => setPasswordData((prev) => ({ ...prev, newPassword: event.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="At least 6 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() => togglePasswordVisibility("newPassword")}
+                  className="absolute inset-y-0 right-0 px-3 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  {showPasswords.newPassword ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
-              <input
-                type="password"
-                value={passwordData.confirmPassword}
-                onChange={(event) => setPasswordData((prev) => ({ ...prev, confirmPassword: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                placeholder="Re-enter new password"
-              />
+              <div className="relative">
+                <input
+                  type={showPasswords.confirmPassword ? "text" : "password"}
+                  value={passwordData.confirmPassword}
+                  onChange={(event) => setPasswordData((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 pr-16 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Re-enter new password"
+                />
+                <button
+                  type="button"
+                  onClick={() => togglePasswordVisibility("confirmPassword")}
+                  className="absolute inset-y-0 right-0 px-3 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  {showPasswords.confirmPassword ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
           </div>
           <div className="flex items-center justify-between">

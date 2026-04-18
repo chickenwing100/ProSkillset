@@ -91,6 +91,7 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
         const hasReachedClaimLimit = job.applications.length >= 5
         const hasApplied = job.applications.some(app => app.applicant === user?.email)
         const isDeletionLocked = Boolean(job.selectedContractor) || ["in_progress", "pending_client_confirmation", "completed"].includes(job.status)
+        const canShowApplySection = !showMyJobs && !hasReachedClaimLimit
 
         return (
           <div key={job.id} className="bg-white rounded-lg p-4 shadow-md sm:p-6">
@@ -138,10 +139,10 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
                 {job.photos.map(photo => (
                   <img
                     key={photo.id}
-                    src={photo.data}
+                    src={photo.data || photo.url}
                     alt={photo.name}
                     className="w-full h-32 object-cover rounded-md border cursor-pointer hover:opacity-80"
-                    onClick={() => setSelectedPhoto(photo.data)}
+                    onClick={() => setSelectedPhoto(photo.data || photo.url)}
                   />
                 ))}
               </div>
@@ -158,17 +159,23 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
               </Link>
               {job.completionRequested && !job.completionConfirmed && (
                 <button
-                  onClick={() => confirmJobCompletion(job.id)}
+                  onClick={async () => {
+                    try {
+                      await confirmJobCompletion(job.id)
+                    } catch (error) {
+                      alert(error.message || "Unable to confirm completion")
+                    }
+                  }}
                   className="rounded bg-green-600 px-4 py-2 text-center text-sm text-white transition hover:bg-green-700"
                 >
                   Confirm Completion
                 </button>
               )}
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (window.confirm('Are you sure you want to remove this job posting? This action cannot be undone.')) {
                     try {
-                      deleteJob(job.id)
+                      await deleteJob(job.id)
                     } catch (error) {
                       alert(error.message || "Unable to remove post")
                     }
@@ -200,7 +207,13 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
                           </span>
                           {!job.selectedContractor && (
                             <button
-                              onClick={() => acceptApplication(job.id, app.id)}
+                              onClick={async () => {
+                                try {
+                                  await acceptApplication(job.id, app.id)
+                                } catch (error) {
+                                  alert(error.message || "Unable to accept application")
+                                }
+                              }}
                               className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
                             >
                               Accept
@@ -233,7 +246,7 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
               )}
             </div>
           ) : (
-            !showMyJobs && (
+            canShowApplySection && (
               <div className="border-t pt-4">
                 <h4 className="font-medium mb-2">Apply for this job</h4>
                 <p className="text-xs text-gray-500 mb-2">
@@ -250,7 +263,7 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
                       onChange={(e) => setBidMin(e.target.value)}
                       placeholder="Min bid"
                       className={`w-full rounded-md border border-gray-300 py-3 pl-8 pr-3 focus:outline-none focus:ring-2 ${focusRingClass}`}
-                      disabled={hasReachedClaimLimit || hasApplied}
+                      disabled={hasApplied}
                     />
                   </div>
                   <div className="relative">
@@ -262,7 +275,7 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
                       onChange={(e) => setBidMax(e.target.value)}
                       placeholder="Max bid"
                       className={`w-full rounded-md border border-gray-300 py-3 pl-8 pr-3 focus:outline-none focus:ring-2 ${focusRingClass}`}
-                      disabled={hasReachedClaimLimit || hasApplied}
+                      disabled={hasApplied}
                     />
                   </div>
                 </div>
@@ -272,19 +285,17 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
                   placeholder="Tell the project owner why you're a good fit for this job..."
                   className={`w-full p-3 border border-gray-300 rounded-md mb-3 focus:outline-none focus:ring-2 ${focusRingClass}`}
                   rows={3}
-                  disabled={hasReachedClaimLimit || hasApplied}
+                  disabled={hasApplied}
                 />
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <button
                     onClick={() => handleApply(job.id)}
-                    disabled={applyingTo === job.id || hasReachedClaimLimit || hasApplied}
+                    disabled={applyingTo === job.id || hasApplied}
                     className={`rounded-md px-6 py-2 transition hover:shadow-md focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50 sm:w-auto ${buttonStyles[userTheme]}`}
                   >
                     {hasApplied
                       ? "Already Applied"
-                      : hasReachedClaimLimit
-                        ? "Claim Limit Reached"
-                        : applyingTo === job.id
+                      : applyingTo === job.id
                           ? "Applying..."
                           : "Apply Now"
                     }
