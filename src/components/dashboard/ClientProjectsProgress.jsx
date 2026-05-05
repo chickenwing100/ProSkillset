@@ -27,7 +27,7 @@ export default function ClientProjectsProgress({ jobs }) {
         <div className="space-y-4">
           {myJobs.map((job) => {
             const progress = Number(job.progress || 0)
-            const hasContractor = job.applications.length > 0
+            const hasContractor = Number(job.applicationCount || 0) > 0
 
             return (
               <div key={job.id} className="border border-gray-100 rounded-lg p-4">

@@ -32,7 +32,7 @@ export default function ProjectFeedPreview({ jobs }) {
                   <p className="text-sm text-gray-600 mb-2 line-clamp-2">{job.description}</p>
                   <div className="mb-2">
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
-                      {5 - (job.applications?.length || 0)} slots left
+                      {5 - Number(job.applicationCount || 0)} slots left
                     </span>
                   </div>
                   <div className="flex items-center space-x-4 text-xs text-gray-500">

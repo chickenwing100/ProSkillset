@@ -80,7 +80,7 @@ export default function PostedProjectsPage() {
                 <div className="flex items-center justify-between gap-3 text-sm text-gray-600">
                   <span>Applicants</span>
                   <span className="font-medium">
-                    {(project.applications || []).length}
+                    {Number(project.applicationCount || 0)}
                     {project.selectedContractor ? " · Contractor selected" : ""}
                   </span>
                 </div>

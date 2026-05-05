@@ -14,6 +14,21 @@ const normalizeJobId = (value) => {
   return normalized || null
 }
 const DAY_MS = 24 * 60 * 60 * 1000
+const CONTRACTOR_PAGE_SIZE = 12
+const CONTRACTOR_DIRECTORY_COLUMNS = [
+  'email',
+  'role',
+  'full_name',
+  'location',
+  'service_area',
+  'avatar_url',
+  'profile_photo_url',
+  'portfolio',
+  'bio',
+  'skills',
+  'trade_categories',
+  'insurance_verified_by_admin'
+].join(', ')
 
 const parseTimestamp = (value) => {
   const timestamp = new Date(value).getTime()
@@ -60,9 +75,8 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
     const jobId = normalizeJobId(job?.id)
     const postedBy = normalizeEmail(job?.postedBy)
     const selectedContractor = normalizeEmail(job?.selectedContractor)
-    const hasApplication = Array.isArray(job?.applications)
-      ? job.applications.some((application) => normalizeEmail(application?.applicant) === normalizedContractorEmail)
-      : false
+    const applicantEmails = Array.isArray(job?.applicantEmails) ? job.applicantEmails.map(normalizeEmail) : []
+    const hasApplication = applicantEmails.includes(normalizedContractorEmail)
 
     if (selectedContractor === normalizedContractorEmail || hasApplication) {
       if (jobId) {
@@ -147,11 +161,14 @@ const computeResponseMetric = ({ contractorEmail, jobs, messages }) => {
 }
 
 export default function ContractorsPage() {
-  const { savedContractors, isContractorSaved } = useSavedContractors()
+  const { savedContractors } = useSavedContractors()
   const { jobs } = useJobs()
   const { messages } = useMessages()
   const { reviews } = useReviews()
-  const [contractors, setContractors] = useState([])
+  const [contractorProfiles, setContractorProfiles] = useState([])
+  const [hasMoreContractors, setHasMoreContractors] = useState(false)
+  const [isLoadingContractors, setIsLoadingContractors] = useState(false)
+  const [hasLoadedInitialContractors, setHasLoadedInitialContractors] = useState(false)
   const [showSaved, setShowSaved] = useState(false)
   const [sortBy, setSortBy] = useState('rating')
   const [locationSearch, setLocationSearch] = useState('')
@@ -159,6 +176,10 @@ export default function ContractorsPage() {
   const tradeValueToLabel = useMemo(() => new Map(
     tradeFilterOptions.map((option) => [option.value, option.category || ''])
   ), [])
+  const savedContractorEmails = useMemo(
+    () => new Set(savedContractors.map((contractor) => normalizeEmail(contractor?.email))),
+    [savedContractors]
+  )
 
   const mapProfilesToContractors = (profiles = []) => {
     return profiles
@@ -200,60 +221,161 @@ export default function ContractorsPage() {
           location: profile.location || profile.serviceArea || profile.service_area || 'Location not set',
           description: profile.bio || profile.description || portfolioProfileData.bio || 'No profile description yet.',
           photo: profile.profilePhoto || profile.profilePhotoUrl || profile.profile_photo_url || profile.avatar_url || '/api/placeholder/150/150',
-          verified: Boolean(profile.insuranceVerified || portfolioProfileData.insuranceVerified || portfolioProfileData.insuranceVerifiedByAdmin),
+          verified: Boolean(
+            profile.insuranceVerified ||
+            profile.insurance_verified_by_admin ||
+            portfolioProfileData.insuranceVerified ||
+            portfolioProfileData.insuranceVerifiedByAdmin
+          ),
           responseTime: metric.responseTime,
           responseHoursBucket: metric.responseHoursBucket,
           responseSamples: metric.responseSamples,
           completedProjects,
           rating,
           reviewCount,
-          saved: isContractorSaved(email)
+          saved: savedContractorEmails.has(email)
         }
       })
   }
 
-  const readContractorsFromStorage = () => {
+  const readContractorsFromStorage = (offset = 0, limit = CONTRACTOR_PAGE_SIZE) => {
     try {
       const usersMap = JSON.parse(localStorage.getItem('users') || '{}')
-      if (!usersMap || typeof usersMap !== 'object') return []
+      if (!usersMap || typeof usersMap !== 'object') {
+        return {
+          profiles: [],
+          hasMore: false
+        }
+      }
 
-      return mapProfilesToContractors(Object.values(usersMap))
+      const allProfiles = Object.values(usersMap)
+      const pageProfiles = allProfiles.slice(offset, offset + limit)
+
+      return {
+        profiles: pageProfiles,
+        hasMore: offset + limit < allProfiles.length
+      }
     } catch {
-      return []
+      return {
+        profiles: [],
+        hasMore: false
+      }
     }
   }
 
-  const readContractorsFromSupabase = async () => {
+  const readContractorsFromSupabase = async ({ offset = 0, append = false } = {}) => {
     if (!isSupabaseConfigured) {
-      return readContractorsFromStorage()
+      const storagePage = readContractorsFromStorage(offset, CONTRACTOR_PAGE_SIZE)
+      return {
+        profiles: storagePage.profiles,
+        hasMore: storagePage.hasMore,
+        append
+      }
     }
 
     try {
+      const rangeEnd = offset + CONTRACTOR_PAGE_SIZE
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select(CONTRACTOR_DIRECTORY_COLUMNS)
         .eq('role', 'contractor')
+        .order('full_name', { ascending: true })
+        .range(offset, rangeEnd)
 
       if (error) {
-        return readContractorsFromStorage()
+        const storagePage = readContractorsFromStorage(offset, CONTRACTOR_PAGE_SIZE)
+        return {
+          profiles: storagePage.profiles,
+          hasMore: storagePage.hasMore,
+          append
+        }
       }
 
-      return mapProfilesToContractors(Array.isArray(data) ? data : [])
+      const nextProfiles = Array.isArray(data) ? data : []
+      return {
+        profiles: nextProfiles.slice(0, CONTRACTOR_PAGE_SIZE),
+        hasMore: nextProfiles.length > CONTRACTOR_PAGE_SIZE,
+        append
+      }
     } catch {
-      return readContractorsFromStorage()
+      const storagePage = readContractorsFromStorage(offset, CONTRACTOR_PAGE_SIZE)
+      return {
+        profiles: storagePage.profiles,
+        hasMore: storagePage.hasMore,
+        append
+      }
     }
   }
 
   useEffect(() => {
+    let cancelled = false
+
+    const applyPage = ({ profiles, hasMore, append }) => {
+      if (cancelled) return
+
+      setContractorProfiles((previous) => {
+        if (!append) return profiles
+
+        const mergedByEmail = new Map(previous.map((profile) => [normalizeEmail(profile?.email), profile]))
+        profiles.forEach((profile) => {
+          mergedByEmail.set(normalizeEmail(profile?.email), profile)
+        })
+        return Array.from(mergedByEmail.values())
+      })
+      setHasMoreContractors(hasMore)
+    }
+
     const hydrate = async () => {
-      const nextContractors = await readContractorsFromSupabase()
-      setContractors(nextContractors)
+      setIsLoadingContractors(true)
+      const nextPage = await readContractorsFromSupabase({ offset: 0, append: false })
+      applyPage(nextPage)
+      if (!cancelled) {
+        setIsLoadingContractors(false)
+        setHasLoadedInitialContractors(true)
+      }
     }
 
     void hydrate()
     window.addEventListener('storage', hydrate)
-    return () => window.removeEventListener('storage', hydrate)
-  }, [isContractorSaved, jobs, messages, reviews, savedContractors])
+    return () => {
+      cancelled = true
+      window.removeEventListener('storage', hydrate)
+    }
+  }, [])
+
+  const loadMoreContractors = async () => {
+    if (isLoadingContractors || !hasMoreContractors) return
+
+    setIsLoadingContractors(true)
+    const nextPage = await readContractorsFromSupabase({
+      offset: contractorProfiles.length,
+      append: true
+    })
+    setContractorProfiles((previous) => {
+      const mergedByEmail = new Map(previous.map((profile) => [normalizeEmail(profile?.email), profile]))
+      nextPage.profiles.forEach((profile) => {
+        mergedByEmail.set(normalizeEmail(profile?.email), profile)
+      })
+      return Array.from(mergedByEmail.values())
+    })
+    setHasMoreContractors(nextPage.hasMore)
+    setIsLoadingContractors(false)
+  }
+
+  const refreshContractors = async () => {
+    if (isLoadingContractors) return
+
+    setIsLoadingContractors(true)
+    const nextPage = await readContractorsFromSupabase({ offset: 0, append: false })
+    setContractorProfiles(nextPage.profiles)
+    setHasMoreContractors(nextPage.hasMore)
+    setIsLoadingContractors(false)
+  }
+
+  const contractors = useMemo(
+    () => mapProfilesToContractors(contractorProfiles),
+    [contractorProfiles, jobs, messages, reviews, savedContractorEmails]
+  )
 
   const contractorsToShow = useMemo(() => {
     const contractorMapByEmail = new Map(
@@ -294,6 +416,9 @@ export default function ContractorsPage() {
         return Number(b.rating || 0) - Number(a.rating || 0)
       })
   }, [contractors, locationSearch, savedContractors, showSaved, sortBy, tradeFilter, tradeValueToLabel])
+
+  const showInitialContractorSkeleton = !showSaved && !hasLoadedInitialContractors
+  const showContractorEmptyState = !showInitialContractorSkeleton && contractorsToShow.length === 0
 
   return (
     <div className="min-h-screen bg-gray-50 py-6 sm:py-8">
@@ -373,22 +498,48 @@ export default function ContractorsPage() {
             />
 
             <button
-              onClick={async () => setContractors(await readContractorsFromSupabase())}
+              onClick={refreshContractors}
+              disabled={isLoadingContractors}
               className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
-              Refresh
+              {isLoadingContractors ? 'Loading...' : 'Refresh'}
             </button>
           </div>
         )}
 
         {/* Contractor Grid */}
-        {contractorsToShow.length > 0 ? (
+        {showInitialContractorSkeleton ? (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm animate-pulse">
+                <div className="mb-4 flex items-start gap-4">
+                  <div className="h-16 w-16 rounded-full bg-gray-200" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-5 w-2/3 rounded bg-gray-200" />
+                    <div className="h-4 w-1/2 rounded bg-gray-100" />
+                    <div className="h-4 w-1/3 rounded bg-gray-100" />
+                  </div>
+                </div>
+                <div className="mb-4 h-4 w-full rounded bg-gray-100" />
+                <div className="mb-4 h-4 w-5/6 rounded bg-gray-100" />
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="h-14 rounded-xl bg-gray-100" />
+                  <div className="h-14 rounded-xl bg-gray-100" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="h-10 flex-1 rounded-lg bg-gray-100" />
+                  <div className="h-10 flex-1 rounded-lg bg-gray-100" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : contractorsToShow.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {contractorsToShow.map((contractor) => (
               <ContractorCard key={contractor.id} contractor={contractor} />
             ))}
           </div>
-        ) : (
+        ) : showContractorEmptyState ? (
           <div className="text-center py-12">
             <div className="text-gray-400 text-6xl mb-4">📋</div>
             <h3 className="text-xl font-medium text-gray-900 mb-2">
@@ -409,16 +560,21 @@ export default function ContractorsPage() {
               </button>
             )}
           </div>
+        ) : null}
+
+        {!showSaved && contractorsToShow.length > 0 && isLoadingContractors && hasLoadedInitialContractors && (
+          <div className="mt-4 text-center text-sm text-gray-500">Refreshing contractors...</div>
         )}
 
         {/* Load More - only show when browsing and not all shown */}
-        {!showSaved && contractorsToShow.length > 0 && (
+        {!showSaved && contractorsToShow.length > 0 && hasMoreContractors && (
           <div className="text-center mt-12">
             <button
-              onClick={async () => setContractors(await readContractorsFromSupabase())}
+              onClick={loadMoreContractors}
+              disabled={isLoadingContractors}
               className="bg-blue-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
             >
-              Refresh Contractor List
+              {isLoadingContractors ? 'Loading...' : 'Load More Contractors'}
             </button>
           </div>
         )}

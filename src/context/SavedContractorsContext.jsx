@@ -4,8 +4,25 @@ import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 const SavedContractorsContext = createContext()
 const STORAGE_KEY = 'savedContractors'
+const SAVED_CONTRACTOR_SELECT_COLUMNS = 'user_email,client_email,contractor_id,contractor_email,contractor_name,contractor_photo,contractor_data,created_at'
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
 const normalizeId = (value) => String(value || '').trim().toLowerCase()
+const getContractorName = (contractor) => String(
+  contractor?.name
+  || contractor?.full_name
+  || contractor?.fullName
+  || contractor?.contractor_name
+  || ''
+).trim()
+const getContractorPhoto = (contractor) => String(
+  contractor?.photo
+  || contractor?.avatar_url
+  || contractor?.avatarUrl
+  || contractor?.profilePhotoUrl
+  || contractor?.profile_photo_url
+  || contractor?.contractor_photo
+  || ''
+).trim()
 
 const normalizeContractor = (contractor) => {
   const email = normalizeEmail(contractor?.email)
@@ -46,10 +63,12 @@ export function SavedContractorsProvider({ children }) {
     if (!isSupabaseConfigured || !currentUser?.email) return null
 
     try {
+      const normalizedUserEmail = normalizeEmail(currentUser.email)
       const { data, error } = await supabase
         .from('saved_contractors')
-        .select('*')
-        .eq('user_email', normalizeEmail(currentUser.email))
+        .select(SAVED_CONTRACTOR_SELECT_COLUMNS)
+        .or(`user_email.eq.${normalizedUserEmail},client_email.eq.${normalizedUserEmail}`)
+        .order('created_at', { ascending: false })
 
       if (error) return null
 
@@ -62,7 +81,9 @@ export function SavedContractorsProvider({ children }) {
           return normalizeContractor({
             ...contractorData,
             id: row.contractor_id || contractorData.id || contractorData.email,
-            email: row.contractor_email || contractorData.email
+            email: row.contractor_email || contractorData.email,
+            name: getContractorName(contractorData) || row.contractor_name,
+            photo: getContractorPhoto(contractorData) || row.contractor_photo
           })
         })
         .filter((contractor) => Boolean(contractor.id))
@@ -74,10 +95,14 @@ export function SavedContractorsProvider({ children }) {
   const persistSavedContractorToSupabase = async (currentUser, contractor) => {
     if (!isSupabaseConfigured || !currentUser?.email || !contractor?.id) return
 
+    const normalizedUserEmail = normalizeEmail(currentUser.email)
     const payload = {
-      user_email: normalizeEmail(currentUser.email),
+      user_email: normalizedUserEmail,
+      client_email: normalizedUserEmail,
       contractor_id: normalizeId(contractor.id),
       contractor_email: normalizeEmail(contractor.email),
+      contractor_name: getContractorName(contractor),
+      contractor_photo: getContractorPhoto(contractor),
       contractor_data: contractor
     }
 
@@ -98,10 +123,11 @@ export function SavedContractorsProvider({ children }) {
     if (!isSupabaseConfigured || !currentUser?.email || !contractorId) return
 
     try {
+      const normalizedUserEmail = normalizeEmail(currentUser.email)
       await supabase
         .from('saved_contractors')
         .delete()
-        .eq('user_email', normalizeEmail(currentUser.email))
+        .or(`user_email.eq.${normalizedUserEmail},client_email.eq.${normalizedUserEmail}`)
         .eq('contractor_id', normalizeId(contractorId))
     } catch {
       // No-op: local state remains the fallback source.

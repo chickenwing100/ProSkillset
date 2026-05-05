@@ -14,7 +14,6 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
   const [bidMin, setBidMin] = useState("")
   const [bidMax, setBidMax] = useState("")
   const [selectedPhoto, setSelectedPhoto] = useState(null)
-  const [selectedApplication, setSelectedApplication] = useState(null)
 
   const userTheme = user?.role === "client" ? "client" : "contractor"
   const focusRingClass = userTheme === "contractor" ? "focus:ring-orange-500" : "focus:ring-blue-500"
@@ -22,16 +21,6 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
     const profile = getUserProfile(email) || {}
     const candidate = String(profile.name || profile.full_name || profile.contractorName || profile.businessName || "").trim()
     return candidate || fallbackLabel
-  }
-
-  const formatMoney = (value) => Number(value || 0).toFixed(2)
-
-  const getMilestoneLabel = (application) => {
-    const schedule = application?.paymentSchedule || {}
-    if (schedule.mode === "amount") {
-      return `Deposit $${formatMoney(schedule.upfrontAmount)} | Progression $${formatMoney(schedule.progressAmount)} | Final $${formatMoney(schedule.completionAmount)}`
-    }
-    return `Deposit ${Number(schedule.upfrontPercent || 0)}% | Progression ${Number(schedule.progressPercent || 0)}% | Final ${Number(schedule.completionPercent || 0)}%`
   }
 
   const handleApply = async (jobId) => {
@@ -88,8 +77,10 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
     <>
     <div className="space-y-4">
       {jobs.map(job => {
-        const hasReachedClaimLimit = job.applications.length >= 5
-        const hasApplied = job.applications.some(app => app.applicant === user?.email)
+        const applicationCount = Number(job.applicationCount || 0)
+        const applicantEmails = Array.isArray(job.applicantEmails) ? job.applicantEmails : []
+        const hasReachedClaimLimit = applicationCount >= 5
+        const hasApplied = applicantEmails.includes(user?.email)
         const isDeletionLocked = Boolean(job.selectedContractor) || ["in_progress", "pending_client_confirmation", "completed"].includes(job.status)
         const canShowApplySection = !showMyJobs && !hasReachedClaimLimit
 
@@ -123,7 +114,7 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
             </span>
             {!showMyJobs && (
               <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
-                {5 - job.applications.length} slots left
+                {5 - applicationCount} slots left
               </span>
             )}
             {job.location && (
@@ -192,65 +183,23 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
 
           {showMyJobs ? (
             <div className="border-t pt-4">
-              <h4 className="font-medium mb-2">Applications ({job.applications.length})</h4>
-              {job.applications.length === 0 ? (
-                <p className="text-gray-500 text-sm">No applications yet</p>
-              ) : (
-                <div className="space-y-2">
-                  {job.applications.map(app => (
-                    <div key={app.id} className="bg-gray-50 p-3 rounded">
-                      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <p className="font-medium">{app.applicantName}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm text-gray-700 font-medium">
-                            Bid Range: ${Number(app.bidMin || app.bidAmount || 0)} - ${Number(app.bidMax || app.bidAmount || 0)}
-                          </span>
-                          {!job.selectedContractor && (
-                            <button
-                              onClick={async () => {
-                                try {
-                                  await acceptApplication(job.id, app.id)
-                                } catch (error) {
-                                  alert(error.message || "Unable to accept application")
-                                }
-                              }}
-                              className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
-                            >
-                              Accept
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedApplication({ jobTitle: job.title, poNumber: job.poNumber, application: app })}
-                            className="rounded bg-gray-900 px-2 py-1 text-xs text-white hover:bg-black transition-colors"
-                          >
-                            View Application
-                          </button>
-                          <Link
-                            to={`/profile/${encodeURIComponent(app.applicant)}`}
-                            className="text-blue-600 hover:text-blue-800 text-sm"
-                          >
-                            View Profile
-                          </Link>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-500 mb-1">Status: {app.status || 'pending'}</p>
-                      <p className="text-sm text-gray-600">{app.message}</p>
-                      <p className="text-xs text-gray-500 mt-1">Milestones: {getMilestoneLabel(app)}</p>
-                      <p className="text-xs text-gray-500">
-                        Applied on {formatDateTime(app.appliedDate)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <h4 className="font-medium mb-2">Applications ({applicationCount})</h4>
+              <p className="text-sm text-gray-600 mb-3">
+                Review full bids, milestones, and accept a contractor from the individual project page.
+              </p>
+              <Link
+                to={`/projects/${job.id}`}
+                className="inline-flex rounded bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-700"
+              >
+                Manage Applications
+              </Link>
             </div>
           ) : (
             canShowApplySection && (
               <div className="border-t pt-4">
                 <h4 className="font-medium mb-2">Apply for this job</h4>
                 <p className="text-xs text-gray-500 mb-2">
-                  Claims: {job.applications.length}/5
+                  Claims: {applicationCount}/5
                 </p>
                 <p className="text-sm font-medium text-gray-700 mb-2">Your Bid Range (USD)</p>
                 <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -332,47 +281,6 @@ export default function JobFeed({ jobs, showMyJobs = false }) {
           className="max-h-[90vh] max-w-[95vw] rounded-lg shadow-2xl"
           onClick={(event) => event.stopPropagation()}
         />
-      </div>
-    )}
-    {selectedApplication && (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-        onClick={() => setSelectedApplication(null)}
-      >
-        <div
-          className="w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Application Details</h3>
-              <p className="text-sm text-gray-600">{selectedApplication.jobTitle}</p>
-              {selectedApplication.poNumber && (
-                <p className="text-xs text-gray-500">PO#: {selectedApplication.poNumber}</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedApplication(null)}
-              className="rounded bg-gray-100 px-3 py-1 text-sm text-gray-700 hover:bg-gray-200"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-2 text-sm text-gray-700">
-            <p><span className="font-medium">Applicant:</span> {selectedApplication.application.applicantName}</p>
-            <p><span className="font-medium">Bid Range:</span> ${Number(selectedApplication.application.bidMin || selectedApplication.application.bidAmount || 0)} - ${Number(selectedApplication.application.bidMax || selectedApplication.application.bidAmount || 0)}</p>
-            <p><span className="font-medium">Status:</span> {selectedApplication.application.status || "pending"}</p>
-            <p><span className="font-medium">Applied:</span> {formatDateTime(selectedApplication.application.appliedDate)}</p>
-            <p><span className="font-medium">Milestones:</span> {getMilestoneLabel(selectedApplication.application)}</p>
-          </div>
-
-          <div className="mt-4 rounded border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cover Message</p>
-            <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap">{selectedApplication.application.message || "No message provided."}</p>
-          </div>
-        </div>
       </div>
     )}
     </>

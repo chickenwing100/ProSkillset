@@ -47,7 +47,7 @@ export default function Dashboard() {
     // Keep contractor dashboard feed in sync with the same source of truth as project feed.
     return jobs.filter((job) => {
       if (job.status !== "open") return false
-      if ((job.applications || []).length >= 5) return false
+      if (Number(job.applicationCount || 0) >= 5) return false
 
       if (user.role === "contractor") {
         return normalizeEmail(job.postedBy) !== normalizeEmail(user.email)

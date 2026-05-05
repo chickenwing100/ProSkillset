@@ -4,6 +4,7 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase"
 
 const ReviewsContext = createContext(null)
 const STORAGE_KEY = "contractor_reviews_v1"
+const REVIEW_SELECT_COLUMNS = "id,job_id,contractor_email,client_email,rating,comment,created_at,updated_at"
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
 const clampRating = (value) => Math.max(1, Math.min(5, Number(value) || 0))
@@ -65,7 +66,7 @@ function readStoredReviews() {
 }
 
 export function ReviewsProvider({ children }) {
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const [reviews, setReviews] = useState([])
   const [isHydrated, setIsHydrated] = useState(false)
 
@@ -75,7 +76,8 @@ export function ReviewsProvider({ children }) {
     try {
       const { data, error } = await supabase
         .from("contractor_reviews")
-        .select("*")
+        .select(REVIEW_SELECT_COLUMNS)
+        .order("created_at", { ascending: false })
 
       if (error) return null
 
@@ -100,15 +102,10 @@ export function ReviewsProvider({ children }) {
   }
 
   useEffect(() => {
-    const hydrate = async () => {
-      const supabaseReviews = await loadReviewsFromSupabase()
-      const nextReviews = supabaseReviews ?? readStoredReviews()
-      setReviews(nextReviews)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextReviews))
-      setIsHydrated(true)
-    }
-
-    void hydrate()
+    const nextReviews = readStoredReviews()
+    setReviews(nextReviews)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextReviews))
+    setIsHydrated(true)
   }, [])
 
   useEffect(() => {
@@ -117,7 +114,7 @@ export function ReviewsProvider({ children }) {
   }, [isHydrated, reviews])
 
   useEffect(() => {
-    if (!isHydrated || !user) return
+    if (!isHydrated || authLoading || !user) return
 
     const hydrate = async () => {
       const supabaseReviews = await loadReviewsFromSupabase()
@@ -128,7 +125,7 @@ export function ReviewsProvider({ children }) {
     }
 
     void hydrate()
-  }, [isHydrated, user])
+  }, [authLoading, isHydrated, user])
 
   const submitReview = ({ jobId, contractorEmail, clientEmail, rating, comment = "" }) => {
     const normalizedContractorEmail = normalizeEmail(contractorEmail)

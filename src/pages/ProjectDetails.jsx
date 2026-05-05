@@ -52,13 +52,20 @@ export default function ProjectDetails() {
   const { user } = useAuth()
   const {
     getJobById,
+    fetchJobById,
     applyToJob,
     acceptApplication,
     addProgressUpdate,
     markJobComplete,
     confirmJobCompletion
   } = useJobs()
-  const { messages, sendMessage } = useMessages()
+  const {
+    sendMessage,
+    getProjectConversation,
+    loadProjectConversation,
+    isProjectConversationLoading,
+    hasMoreProjectConversation
+  } = useMessages()
   const { getReviewForJob, submitReview } = useReviews()
 
   const [applicationMessage, setApplicationMessage] = useState("")
@@ -80,8 +87,45 @@ export default function ProjectDetails() {
   const [previewState, setPreviewState] = useState({ photos: [], index: -1 })
   const [touchStartX, setTouchStartX] = useState(null)
   const [selectedApplication, setSelectedApplication] = useState(null)
+  const [isLoadingJob, setIsLoadingJob] = useState(false)
+  const [hasResolvedJobLoad, setHasResolvedJobLoad] = useState(false)
 
   const job = getJobById(id)
+  const hasFullJobDetails = Boolean(job?._hasFullDetails)
+  const applicationCount = Number(job?.applicationCount || job?.applications?.length || 0)
+  const applicantEmails = Array.isArray(job?.applicantEmails) ? job.applicantEmails : []
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!id) return () => {
+      cancelled = true
+    }
+
+    setHasResolvedJobLoad(false)
+
+    if (hasFullJobDetails) {
+      setIsLoadingJob(false)
+      setHasResolvedJobLoad(true)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setIsLoadingJob(true)
+
+    void fetchJobById(id)
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingJob(false)
+          setHasResolvedJobLoad(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasFullJobDetails, id])
 
   const roleTheme = user?.role === "contractor"
     ? {
@@ -96,8 +140,10 @@ export default function ProjectDetails() {
       }
 
   const myApplication = useMemo(
-    () => job?.applications?.find((app) => app.applicant === user?.email),
-    [job, user]
+    () => job?._hasFullDetails
+      ? job?.applications?.find((app) => app.applicant === user?.email)
+      : (applicantEmails.includes(user?.email) ? { applicant: user?.email } : null),
+    [applicantEmails, job, user]
   )
   const existingReview = useMemo(
     () => getReviewForJob(job?.id, user?.email),
@@ -110,21 +156,32 @@ export default function ProjectDetails() {
   )
 
   const projectThreadMessages = useMemo(
-    () => messages
-      .filter((message) =>
-        sameJobId(message.jobId, job?.id) &&
-        projectParticipants.includes(message.from) &&
-        projectParticipants.includes(message.to)
-      )
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)),
-    [messages, job, projectParticipants]
+    () => getProjectConversation({ jobId: job?.id, participants: projectParticipants }),
+    [getProjectConversation, job?.id, projectParticipants]
   )
+  const isLoadingProjectConversation = isProjectConversationLoading({ jobId: job?.id, participants: projectParticipants })
+  const canLoadOlderProjectConversation = hasMoreProjectConversation({ jobId: job?.id, participants: projectParticipants })
+
+  useEffect(() => {
+    if (!job?.id || projectParticipants.length < 2) return
+    void loadProjectConversation({ jobId: job.id, participants: projectParticipants })
+  }, [job?.id, projectParticipants])
 
   useEffect(() => {
     if (!existingReview) return
     setReviewRating(Number(existingReview.rating || 5))
     setReviewComment(existingReview.comment || "")
   }, [existingReview])
+
+  if (!job && !hasResolvedJobLoad) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading project...</h2>
+        </div>
+      </div>
+    )
+  }
 
   if (!job) {
     return (
@@ -144,7 +201,7 @@ export default function ProjectDetails() {
 
   const isClientOwner = user?.email === job.postedBy
   const isAcceptedContractor = user?.email === job.selectedContractor
-  const claimLimitReached = (job.applications || []).length >= 5
+  const claimLimitReached = applicationCount >= 5
   const canApply = user?.role === "contractor" && !isClientOwner && !job.selectedContractor && !claimLimitReached
 
   const formatMoney = (value) => Number(value || 0).toFixed(2)
@@ -279,6 +336,14 @@ export default function ProjectDetails() {
     } catch (error) {
       alert(error.message || "Unable to send message")
     }
+  }
+
+  const handleLoadOlderProjectMessages = async () => {
+    if (!job?.id || projectParticipants.length < 2 || isLoadingProjectConversation || !canLoadOlderProjectConversation) {
+      return
+    }
+
+    await loadProjectConversation({ jobId: job.id, participants: projectParticipants }, { append: true })
   }
 
   const handleSubmitReview = async () => {
@@ -610,7 +675,22 @@ export default function ProjectDetails() {
       {isClientOwner && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Applications & Bids</h2>
-          {job.applications.length === 0 ? (
+          {!hasFullJobDetails ? (
+            <div className="space-y-3 animate-pulse">
+              {applicationCount > 0 ? (
+                Array.from({ length: Math.min(applicationCount, 2) }).map((_, index) => (
+                  <div key={index} className="border border-gray-100 rounded-lg p-3">
+                    <div className="mb-2 h-5 w-1/3 rounded bg-gray-200" />
+                    <div className="mb-2 h-4 w-full rounded bg-gray-100" />
+                    <div className="mb-2 h-4 w-2/3 rounded bg-gray-100" />
+                    <div className="h-8 w-28 rounded bg-gray-100" />
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500">Loading applications...</p>
+              )}
+            </div>
+          ) : job.applications.length === 0 ? (
             <p className="text-gray-500">No applications yet.</p>
           ) : (
             <div className="space-y-3">
@@ -793,8 +873,22 @@ export default function ProjectDetails() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Project Messages</h2>
           <div className="max-h-64 overflow-y-auto border border-gray-100 rounded-lg p-3 mb-3 space-y-2">
+            {canLoadOlderProjectConversation && (
+              <div className="flex justify-center pb-1">
+                <button
+                  type="button"
+                  onClick={handleLoadOlderProjectMessages}
+                  disabled={isLoadingProjectConversation}
+                  className="text-sm text-gray-600 hover:text-gray-900 disabled:opacity-60"
+                >
+                  {isLoadingProjectConversation ? "Loading..." : "Load older messages"}
+                </button>
+              </div>
+            )}
             {projectThreadMessages.length === 0 ? (
-              <p className="text-sm text-gray-500">No project messages yet.</p>
+              <p className="text-sm text-gray-500">
+                {isLoadingProjectConversation ? "Loading project messages..." : "No project messages yet."}
+              </p>
             ) : (
               projectThreadMessages.map((message) => {
                 const mine = message.from === user?.email

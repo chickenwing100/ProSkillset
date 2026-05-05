@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import UserProfile from "../components/UserProfile"
@@ -11,21 +11,55 @@ const normalizeEmail = (value) => (value || "").trim().toLowerCase()
 
 export default function Profile() {
   const { email } = useParams()
-  const { user, getUserProfile } = useAuth()
+  const { user, getUserProfile, fetchUserProfileByEmail } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [remoteProfile, setRemoteProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   // If no email in params, show current user's profile.
   const profileEmail = normalizeEmail(email || user?.email)
   const currentUserEmail = normalizeEmail(user?.email)
   const storedProfile = profileEmail ? getUserProfile(profileEmail) : null
   const isOwnProfile = Boolean(profileEmail && currentUserEmail && profileEmail === currentUserEmail)
-  const profileUser = storedProfile || (isOwnProfile ? user : null)
+  const profileUser = storedProfile || remoteProfile || (isOwnProfile ? user : null)
   const query = new URLSearchParams(location.search)
   const isSetupFlow = query.get("setup") === "1"
   const isConfirmed = query.get("confirmed") === "1"
   const termsAccepted = Boolean(profileUser?.termsAcceptedAt) || hasAcceptedTerms(currentUserEmail)
   const contractorAgreementAccepted = Boolean(profileUser?.contractorAgreementAcceptedAt) || hasAcceptedContractorAgreement(currentUserEmail)
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!profileEmail || storedProfile || isOwnProfile) {
+      setRemoteProfile(null)
+      setProfileLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setProfileLoading(true)
+
+    void fetchUserProfileByEmail(profileEmail)
+      .then((profile) => {
+        if (cancelled) return
+        setRemoteProfile(profile)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setRemoteProfile(null)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setProfileLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [fetchUserProfileByEmail, isOwnProfile, profileEmail, storedProfile])
 
   useEffect(() => {
     if (!isOwnProfile || !isSetupFlow || !isConfirmed || !currentUserEmail) return
@@ -53,6 +87,14 @@ export default function Profile() {
     profileUser?.role,
     contractorAgreementAccepted
   ])
+
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center text-gray-600">Loading profile...</div>
+      </div>
+    )
+  }
 
   if (!profileUser) {
     return (

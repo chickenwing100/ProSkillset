@@ -20,6 +20,11 @@ if (!hasValidCredentials) {
     auth: {
       signUp: () => Promise.resolve({ data: { user: null }, error: null }),
       signInWithPassword: () => Promise.resolve({ data: { user: null }, error: null }),
+      resetPasswordForEmail: () => Promise.resolve({ data: null, error: null }),
+      updateUser: () => Promise.resolve({ data: { user: null }, error: null }),
+      resend: () => Promise.resolve({ data: null, error: null }),
+      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+      getUser: () => Promise.resolve({ data: { user: null }, error: null }),
       signOut: () => Promise.resolve({ error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } })
     },

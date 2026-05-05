@@ -21,7 +21,7 @@ export default function ProjectFeed() {
 
     return jobs.filter((job) => {
       if ((job.status || 'open') !== 'open') return false
-      if ((job.applications || []).length >= 5) return false
+      if (Number(job.applicationCount || 0) >= 5) return false
       return true
     })
   }, [jobs, user])
@@ -171,7 +171,7 @@ export default function ProjectFeed() {
 
               <div className="mt-3">
                 <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${roleTheme.badge}`}>
-                  {5 - (project.applications?.length || 0)} slots left
+                  {5 - Number(project.applicationCount || 0)} slots left
                 </span>
               </div>
 

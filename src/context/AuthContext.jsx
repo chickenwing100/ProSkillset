@@ -716,6 +716,30 @@ export function AuthProvider({ children }) {
     return users[normalizeEmail(email)] || (normalizeEmail(email) === normalizeEmail(user?.email) ? user : null)
   }
 
+  const fetchUserProfileByEmail = async (email) => {
+    const normalizedEmail = normalizeEmail(email)
+    if (!normalizedEmail) return null
+
+    const cachedProfile = getUserProfile(normalizedEmail)
+    if (cachedProfile) return cachedProfile
+
+    if (!isSupabaseConfigured) return null
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("email", normalizedEmail)
+      .maybeSingle()
+
+    if (error || !data) {
+      return null
+    }
+
+    const syncedProfile = mapProfileRowToStoredProfile(data)
+    ensureProfileRecord(syncedProfile)
+    return syncedProfile
+  }
+
   const getAllProfiles = () => {
     if (!isAdminUser()) return []
 
@@ -792,6 +816,7 @@ export function AuthProvider({ children }) {
     updateProfile,
     updateUserProfileByEmail,
     getUserProfile,
+    fetchUserProfileByEmail,
     getAllProfiles,
     isAdminUser,
     updatePassword,

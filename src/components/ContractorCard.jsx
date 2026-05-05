@@ -1,7 +1,10 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { useSavedContractors } from '../context/SavedContractorsContext'
 
 export default function ContractorCard({ contractor }) {
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { saveContractor, unsaveContractor, isContractorSaved } = useSavedContractors()
 
   // Fallback values are only used when profile data is missing.
@@ -37,6 +40,20 @@ export default function ContractorCard({ contractor }) {
       saveContractor(contractorData)
     }
   }
+
+  const handleRequestMessage = () => {
+    if (!contractorData.email) return
+
+    const params = new URLSearchParams({
+      to: contractorData.email,
+      name: contractorData.name || contractorData.email,
+      draft: `Hi ${contractorData.name || "there"}, I'd like to connect about a project.`
+    })
+
+    navigate(`/messages?${params.toString()}`)
+  }
+
+  const canRequestMessage = Boolean(user?.email && contractorData.email && user.email !== contractorData.email)
 
   const renderStars = (rating) => {
     const stars = []
@@ -148,13 +165,21 @@ export default function ContractorCard({ contractor }) {
         </div>
 
         {/* Action buttons */}
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3">
           <Link
             to={profileTarget}
-            className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors text-center"
+            className="flex-1 min-w-[120px] bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors text-center"
           >
             View Profile
           </Link>
+          {canRequestMessage && (
+            <button
+              onClick={handleRequestMessage}
+              className="flex-1 min-w-[120px] border border-blue-200 text-blue-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
+            >
+              Request Message
+            </button>
+          )}
           <button
             onClick={handleSaveToggle}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

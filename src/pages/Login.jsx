@@ -8,14 +8,19 @@ export default function Login() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [error, setError] = useState("")
   const [info, setInfo] = useState("")
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
+  const [sendingReset, setSendingReset] = useState(false)
   const { user, loading: authLoading, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const isConfirmed = new URLSearchParams(location.search).get("confirmed") === "1"
+  const isPasswordReset = new URLSearchParams(location.search).get("reset") === "1"
+
+  const getPasswordResetRedirectTo = () => `${window.location.origin}/reset-password`
 
   useEffect(() => {
     if (authLoading) return
@@ -81,6 +86,42 @@ export default function Login() {
     setResending(false)
   }
 
+  const handleForgotPassword = async () => {
+    const normalizedEmail = String(email || "").trim().toLowerCase()
+    if (!normalizedEmail) {
+      setError("Enter your email above, then request a password reset.")
+      setInfo("")
+      return
+    }
+
+    if (!isSupabaseConfigured) {
+      setError("Supabase is not configured for password recovery.")
+      setInfo("")
+      return
+    }
+
+    setSendingReset(true)
+    setError("")
+    setInfo("")
+
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: getPasswordResetRedirectTo()
+      })
+
+      if (resetError) {
+        setError(resetError.message || "Could not send password reset email")
+        return
+      }
+
+      setInfo("Password reset email sent. Check inbox/spam and open the link to choose a new password.")
+    } catch (err) {
+      setError(err?.message || "Could not send password reset email")
+    } finally {
+      setSendingReset(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-10 sm:py-14">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-md items-center justify-center">
@@ -94,6 +135,11 @@ export default function Login() {
             {isConfirmed && (
               <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
                 Email confirmed. Sign in with your new account.
+              </div>
+            )}
+            {isPasswordReset && (
+              <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                Password updated. Sign in with your new password.
               </div>
             )}
             {info && (
@@ -161,6 +207,36 @@ export default function Login() {
                 {resending ? "Sending confirmation..." : "Resend confirmation email"}
               </button>
             </div>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPassword((current) => !current)
+                  setError("")
+                  setInfo("")
+                }}
+                className="font-medium text-blue-600 hover:text-blue-500"
+              >
+                {showForgotPassword ? "Hide password reset" : "Forgot password?"}
+              </button>
+            </div>
+
+            {showForgotPassword && (
+              <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-4">
+                <p className="text-sm text-gray-600">
+                  Enter your account email above and we&apos;ll send you a reset link.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={sendingReset || loading}
+                  className="group relative w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {sendingReset ? "Sending reset link..." : "Send password reset email"}
+                </button>
+              </div>
+            )}
 
             <div className="text-center">
               <Link

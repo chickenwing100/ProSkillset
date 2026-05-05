@@ -22,6 +22,7 @@ const MyProjects = lazy(() => import("./pages/MyProjects"))
 const AdminInsuranceReview = lazy(() => import("./pages/AdminInsuranceReview"))
 const AdminProSkillset = lazy(() => import("./pages/AdminProSkillset"))
 const Login = lazy(() => import("./pages/Login"))
+const ResetPassword = lazy(() => import("./pages/ResetPassword"))
 const Signup = lazy(() => import("./pages/Signup"))
 const TermsAndConditions = lazy(() => import("./pages/TermsAndConditions"))
 const ContractorAgreement = lazy(() => import("./pages/ContractorAgreement"))
@@ -59,6 +60,7 @@ function App() {
                         <Route path="/" element={<PublicLayout><Landing /></PublicLayout>} />
                         <Route path="/how-it-works" element={<PublicLayout><HowItWorks /></PublicLayout>} />
                         <Route path="/login" element={<PublicLayout><Login /></PublicLayout>} />
+                        <Route path="/reset-password" element={<PublicLayout><ResetPassword /></PublicLayout>} />
                         <Route path="/signup" element={<PublicLayout><Signup /></PublicLayout>} />
                         <Route path="/terms-and-conditions" element={<PublicLayout><TermsAndConditions /></PublicLayout>} />
                         <Route path="/contractor-agreement" element={<PublicLayout><ContractorAgreement /></PublicLayout>} />

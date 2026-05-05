@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useLocation } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
 import { useJobs } from "../context/JobsContext"
 import { useMessages } from "../context/MessagesContext"
@@ -19,9 +20,23 @@ function renderMessageText(text) {
 export default function MessagesPage() {
   const { user, getUserProfile } = useAuth()
   const { jobs } = useJobs()
-  const { messages, sendMessage, getConversation, getUnreadCount, markConversationRead } = useMessages()
+  const {
+    messages,
+    sendMessage,
+    getConversation,
+    loadConversation,
+    isConversationLoading,
+    hasMoreConversation,
+    getUnreadCount,
+    markConversationRead
+  } = useMessages()
+  const location = useLocation()
   const [selectedEmail, setSelectedEmail] = useState("")
   const [draft, setDraft] = useState("")
+  const query = new URLSearchParams(location.search)
+  const requestedEmail = String(query.get("to") || "").trim().toLowerCase()
+  const requestedName = String(query.get("name") || "").trim()
+  const requestedDraft = String(query.get("draft") || "").trim()
 
   const contacts = useMemo(() => {
     if (!user) return []
@@ -84,17 +99,16 @@ export default function MessagesPage() {
 
     jobs.forEach((job) => {
       if (job.postedBy === user.email) {
-        job.applications.forEach((application) => {
+        ;(job.applicantEmails || []).forEach((applicantEmail) => {
           upsertContact({
-            email: application.applicant,
-            name: application.applicantName,
+            email: applicantEmail,
             project: job.title
           })
         })
       }
 
       if (user.role === "contractor") {
-        const hasRelationship = job.applications.some((application) => application.applicant === user.email)
+        const hasRelationship = (job.applicantEmails || []).includes(user.email)
         if (hasRelationship) {
           upsertContact({
             email: job.postedBy,
@@ -128,22 +142,45 @@ export default function MessagesPage() {
       })
     })
 
+    if (requestedEmail && requestedEmail !== normalizeEmail(user?.email)) {
+      const existing = contactMap.get(requestedEmail)
+      contactMap.set(requestedEmail, {
+        email: requestedEmail,
+        name: existing?.name || resolveNameByEmail(requestedEmail, requestedName),
+        project: existing?.project || "Direct conversation"
+      })
+    }
+
     return Array.from(contactMap.values())
-  }, [jobs, messages, user, getUserProfile])
+  }, [jobs, messages, user, getUserProfile, requestedEmail, requestedName])
 
   useEffect(() => {
+    if (requestedEmail && requestedEmail !== selectedEmail) {
+      setSelectedEmail(requestedEmail)
+      return
+    }
+
     if (!selectedEmail && contacts.length > 0) {
       setSelectedEmail(contacts[0].email)
     }
-  }, [contacts, selectedEmail])
+  }, [contacts, requestedEmail, selectedEmail])
+
+  useEffect(() => {
+    if (!requestedDraft) return
+    if (selectedEmail !== requestedEmail) return
+    setDraft((currentDraft) => currentDraft || requestedDraft)
+  }, [requestedDraft, requestedEmail, selectedEmail])
 
   useEffect(() => {
     if (selectedEmail) {
+      void loadConversation(selectedEmail)
       markConversationRead(selectedEmail)
     }
   }, [selectedEmail])
 
   const conversation = getConversation(selectedEmail)
+  const isLoadingConversation = isConversationLoading(selectedEmail)
+  const canLoadOlderConversation = hasMoreConversation(selectedEmail)
   const roleTheme = user?.role === "contractor"
     ? {
         accent: "text-orange-700",
@@ -176,6 +213,11 @@ export default function MessagesPage() {
   }
 
   const selectedContact = contacts.find((contact) => contact.email === selectedEmail)
+
+  const handleLoadOlderMessages = async () => {
+    if (!selectedEmail || isLoadingConversation || !canLoadOlderConversation) return
+    await loadConversation(selectedEmail, { append: true })
+  }
 
   return (
     <div className="mx-auto max-w-6xl p-3 sm:p-6">
@@ -216,8 +258,22 @@ export default function MessagesPage() {
                   <p className="text-xs text-gray-500 mb-3">Reference: {selectedContact.project}</p>
                 )}
                 <div className="flex-1 overflow-y-auto space-y-3 mb-4">
+                  {canLoadOlderConversation && (
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={handleLoadOlderMessages}
+                        disabled={isLoadingConversation}
+                        className="text-sm text-gray-600 hover:text-gray-900 disabled:opacity-60"
+                      >
+                        {isLoadingConversation ? "Loading..." : "Load older messages"}
+                      </button>
+                    </div>
+                  )}
                   {conversation.length === 0 ? (
-                    <p className="text-sm text-gray-500">No messages yet. Start the conversation.</p>
+                    <p className="text-sm text-gray-500">
+                      {isLoadingConversation ? "Loading conversation..." : "No messages yet. Start the conversation."}
+                    </p>
                   ) : (
                     conversation.map((message) => {
                       const mine = message.from === user.email || (user?.role === "admin" && message.from === SYSTEM_EMAIL)

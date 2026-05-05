@@ -5,6 +5,44 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase"
 const JobsContext = createContext()
 const DEMO_CLIENT_EMAIL = "client@example.com"
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase()
+const JOB_SUMMARY_SELECT_COLUMNS = [
+  "id",
+  "title",
+  "description",
+  "category",
+  "trade",
+  "location",
+  "budget",
+  "budget_min",
+  "budget_max",
+  "timeline",
+  "urgency",
+  "requirements",
+  "posted_by",
+  "posted_by_name",
+  "posted_date",
+  "status",
+  "application_count",
+  "applicant_emails",
+  "selected_contractor",
+  "selected_contractor_name",
+  "accepted_bid",
+  "accepted_at",
+  "completion_requested",
+  "completion_requested_at",
+  "completion_confirmed",
+  "completion_confirmed_at",
+  "progress",
+  "progress_note",
+  "progress_updated_by",
+  "progress_updated_at",
+  "status_updated_at",
+  "po_number",
+  "payment_schedule",
+  "created_at",
+  "updated_at"
+].join(",")
+const JOB_DETAIL_SELECT_COLUMNS = `${JOB_SUMMARY_SELECT_COLUMNS},applications,photos,progress_updates`
 
 const normalizePercent = (value, fallback = 0) => {
   const numeric = Number(value)
@@ -186,9 +224,10 @@ const uploadProgressUpdatePhotosToSupabase = async (jobId, updates) => {
 export function JobsProvider({ children }) {
   const [jobs, setJobs] = useState([])
   const [isHydrated, setIsHydrated] = useState(false)
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
 
-  const mapDatabaseRowToJob = (row) => {
+  const mapDatabaseRowToJob = (row, options = {}) => {
+    const includeDetails = Boolean(options.includeDetails)
     if (!row || typeof row !== "object") return null
 
     const mappedJob = {
@@ -208,13 +247,19 @@ export function JobsProvider({ children }) {
       postedByName: row.posted_by_name || row.postedByName || "",
       postedDate: row.posted_date || row.postedDate || row.created_at || new Date().toISOString(),
       status: row.status || "open",
-      applications: Array.isArray(row.applications) ? row.applications : [],
-      photos: Array.isArray(row.photos) ? row.photos : [],
+      applications: includeDetails && Array.isArray(row.applications) ? row.applications : [],
+      applicationCount: Number(row.application_count || row.applicationCount || (Array.isArray(row.applications) ? row.applications.length : 0) || 0),
+      applicantEmails: Array.isArray(row.applicant_emails || row.applicantEmails)
+        ? (row.applicant_emails || row.applicantEmails).map(normalizeEmail).filter(Boolean)
+        : (Array.isArray(row.applications)
+        ? row.applications.map((application) => normalizeEmail(application?.applicant)).filter(Boolean)
+        : []),
+      photos: includeDetails && Array.isArray(row.photos) ? row.photos : [],
       selectedContractor: row.selected_contractor || row.selectedContractor || "",
       selectedContractorName: row.selected_contractor_name || row.selectedContractorName || "",
       acceptedBid: Number(row.accepted_bid || row.acceptedBid || 0),
       acceptedAt: row.accepted_at || row.acceptedAt || "",
-      progressUpdates: Array.isArray(row.progress_updates || row.progressUpdates)
+      progressUpdates: includeDetails && Array.isArray(row.progress_updates || row.progressUpdates)
         ? (row.progress_updates || row.progressUpdates)
         : [],
       completionRequested: Boolean(row.completion_requested || row.completionRequested),
@@ -231,7 +276,8 @@ export function JobsProvider({ children }) {
         upfrontPercent: 0,
         progressPercent: 0,
         completionPercent: 100
-      }
+      },
+      _hasFullDetails: includeDetails
     }
 
     return normalizeJob(mappedJob)
@@ -280,11 +326,18 @@ export function JobsProvider({ children }) {
 
   const normalizeJob = (job) => ({
     ...job,
+    _hasFullDetails: Boolean(job._hasFullDetails),
     category: job.category || job.trade || "",
     postedBy: normalizeEmail(job.postedBy || "client@example.com"),
     postedByName: job.postedByName || "",
     postedDate: job.postedDate || new Date().toISOString(),
     status: job.status || "open",
+    applicationCount: Number(job.applicationCount || (Array.isArray(job.applications) ? job.applications.length : 0) || 0),
+    applicantEmails: Array.isArray(job.applicantEmails)
+      ? job.applicantEmails.map(normalizeEmail).filter(Boolean)
+      : (Array.isArray(job.applications)
+          ? job.applications.map((application) => normalizeEmail(application?.applicant)).filter(Boolean)
+          : []),
     budget: Number(job.budget || job.budgetMax || 0),
     applications: Array.isArray(job.applications)
       ? job.applications.map((application) => ({
@@ -349,16 +402,88 @@ export function JobsProvider({ children }) {
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("*")
+        .select(JOB_SUMMARY_SELECT_COLUMNS)
+        .order("posted_date", { ascending: false })
 
       if (error) return null
 
       return (Array.isArray(data) ? data : [])
-        .map(mapDatabaseRowToJob)
+        .map((row) => mapDatabaseRowToJob(row, { includeDetails: false }))
         .filter(Boolean)
         .filter((job) => normalizeEmail(job?.postedBy) !== DEMO_CLIENT_EMAIL)
     } catch {
       return null
+    }
+  }
+
+  const mergeJobsPreservingDetails = (nextJobs, currentJobs = []) => {
+    const currentJobsById = new Map(
+      currentJobs.map((job) => [String(job?.id).trim(), job])
+    )
+
+    return nextJobs.map((job) => {
+      const existing = currentJobsById.get(String(job?.id).trim())
+      if (!existing?._hasFullDetails) return job
+
+      return normalizeJob({
+        ...job,
+          applications: existing.applications,
+        photos: existing.photos,
+        progressUpdates: existing.progressUpdates,
+        _hasFullDetails: true
+      })
+    })
+  }
+
+  const mergeSingleDetailedJob = (currentJobs, detailedJob) => {
+    const targetId = String(detailedJob?.id || "").trim()
+    if (!targetId) return currentJobs
+
+    let found = false
+    const nextJobs = currentJobs.map((job) => {
+      if (String(job?.id).trim() !== targetId) return job
+      found = true
+      return normalizeJob({
+        ...job,
+        ...detailedJob,
+        _hasFullDetails: true
+      })
+    })
+
+    if (found) return nextJobs
+    return [...currentJobs, normalizeJob({ ...detailedJob, _hasFullDetails: true })]
+  }
+
+  const fetchJobById = async (jobId, options = {}) => {
+    const idStr = String(jobId || "").trim()
+    if (!idStr) return null
+
+    const existingJob = jobs.find((job) => String(job?.id).trim() === idStr || Number(job?.id) === Number(jobId)) || null
+    if (!isSupabaseConfigured) {
+      return existingJob
+    }
+
+    if (existingJob?._hasFullDetails && !options.force) {
+      return existingJob
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .select(JOB_DETAIL_SELECT_COLUMNS)
+        .eq("id", idStr)
+        .maybeSingle()
+
+      if (error || !data) return existingJob
+
+      const detailedJob = mapDatabaseRowToJob(data, { includeDetails: true })
+      if (!detailedJob) return existingJob
+
+      const nextJobs = mergeSingleDetailedJob(jobs, detailedJob)
+      persistJobs(nextJobs)
+      return nextJobs.find((job) => String(job?.id).trim() === idStr || Number(job?.id) === Number(jobId)) || detailedJob
+    } catch {
+      return existingJob
     }
   }
 
@@ -485,26 +610,42 @@ export function JobsProvider({ children }) {
     }
   }
 
-  // Load jobs from localStorage on mount
+  // Load jobs from localStorage on mount and defer Supabase hydration until auth settles.
   useEffect(() => {
+    const localJobs = loadJobsFromStorage() || []
+    setJobs(localJobs)
+
+    const jobsForStorage = localJobs.map(job => ({
+      ...job,
+      photos: stripPhotoData(job.photos),
+      progressUpdates: stripProgressUpdatePhotos(job.progressUpdates)
+    }))
+    localStorage.setItem("jobs", JSON.stringify(jobsForStorage))
+    setIsHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isHydrated || authLoading || !user) return
+
     const hydrate = async () => {
       const supabaseJobs = await loadJobsFromSupabase()
       const localJobs = loadJobsFromStorage()
-      const nextJobs = chooseBestJobs(supabaseJobs, localJobs)
+      const nextJobs = mergeJobsPreservingDetails(
+        chooseBestJobs(supabaseJobs, localJobs, jobs),
+        jobs
+      )
       setJobs(nextJobs)
-      
-      // Strip photo data before storing in localStorage to avoid quota issues
+
       const jobsForStorage = nextJobs.map(job => ({
         ...job,
         photos: stripPhotoData(job.photos),
         progressUpdates: stripProgressUpdatePhotos(job.progressUpdates)
       }))
       localStorage.setItem("jobs", JSON.stringify(jobsForStorage))
-      setIsHydrated(true)
     }
 
     void hydrate()
-  }, [])
+  }, [authLoading, isHydrated, user])
 
   // Save jobs to localStorage whenever jobs change
   useEffect(() => {
@@ -517,20 +658,6 @@ export function JobsProvider({ children }) {
     }))
     localStorage.setItem("jobs", JSON.stringify(jobsForStorage))
   }, [jobs, isHydrated])
-
-  // Ensure jobs state re-syncs when switching between demo accounts.
-  useEffect(() => {
-    if (!isHydrated || !user) return
-
-    const hydrate = async () => {
-      const supabaseJobs = await loadJobsFromSupabase()
-      const localJobs = loadJobsFromStorage()
-      const nextJobs = chooseBestJobs(supabaseJobs, localJobs, jobs)
-      setJobs(nextJobs)
-    }
-
-    void hydrate()
-  }, [user, isHydrated])
 
   useEffect(() => {
     if (!isHydrated) return
@@ -727,7 +854,10 @@ export function JobsProvider({ children }) {
 
     if (cloudCreate.success && isSupabaseConfigured) {
       const supabaseJobs = await loadJobsFromSupabase()
-      const refreshedJobs = chooseBestJobs(supabaseJobs, nextJobs, jobs)
+      const refreshedJobs = mergeJobsPreservingDetails(
+        chooseBestJobs(supabaseJobs, nextJobs, jobs),
+        nextJobs
+      )
       setJobs(refreshedJobs)
       persistJobs(refreshedJobs)
     }
@@ -845,7 +975,7 @@ export function JobsProvider({ children }) {
   const getAvailableJobs = () => {
     if (!user) return []
     const currentUserEmail = normalizeEmail(user.email)
-    return jobs.filter(job => normalizeEmail(job.postedBy) !== currentUserEmail && job.status === "open" && job.applications.length < 5)
+    return jobs.filter(job => normalizeEmail(job.postedBy) !== currentUserEmail && job.status === "open" && Number(job.applicationCount || 0) < 5)
   }
 
   const getClaimedJobs = () => {
@@ -1032,7 +1162,10 @@ export function JobsProvider({ children }) {
     const refresh = async () => {
       const supabaseJobs = await loadJobsFromSupabase()
       const localJobs = loadJobsFromStorage()
-      const nextJobs = chooseBestJobs(supabaseJobs, localJobs, jobs)
+      const nextJobs = mergeJobsPreservingDetails(
+        chooseBestJobs(supabaseJobs, localJobs, jobs),
+        jobs
+      )
       setJobs(nextJobs)
       persistJobs(nextJobs)
     }
@@ -1048,6 +1181,7 @@ export function JobsProvider({ children }) {
     getAvailableJobs,
     getClaimedJobs,
     getJobById,
+    fetchJobById,
     acceptApplication,
     addProgressUpdate,
     markJobComplete,

@@ -1,8 +1,23 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 import { useSavedContractors } from '../../context/SavedContractorsContext'
 
 export default function SavedContractors() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { savedContractors, unsaveContractor } = useSavedContractors()
+
+  const handleRequestMessage = (contractor) => {
+    if (!contractor?.email) return
+
+    const params = new URLSearchParams({
+      to: contractor.email,
+      name: contractor.name || contractor.email,
+      draft: `Hi ${contractor.name || "there"}, I'd like to connect about a project.`
+    })
+
+    navigate(`/messages?${params.toString()}`)
+  }
 
   const renderStars = (rating) => {
     const stars = []
@@ -98,11 +113,19 @@ export default function SavedContractors() {
 
             <div className="flex flex-col space-y-2">
               <Link
-                to={`/contractor/${contractor.id}`}
+                to={contractor.email ? `/profile/${encodeURIComponent(contractor.email)}` : '/profile'}
                 className="text-xs bg-orange-600 text-white px-3 py-1 rounded font-medium hover:bg-orange-700 transition-colors text-center"
               >
                 View
               </Link>
+              {user?.email && user.email !== contractor.email && (
+                <button
+                  onClick={() => handleRequestMessage(contractor)}
+                  className="text-xs border border-blue-200 text-blue-700 px-3 py-1 rounded hover:bg-blue-50 transition-colors"
+                >
+                  Message
+                </button>
+              )}
               <button
                 onClick={() => unsaveContractor(contractor.id)}
                 className="text-xs border border-gray-300 text-gray-700 px-3 py-1 rounded hover:bg-gray-50 transition-colors"
